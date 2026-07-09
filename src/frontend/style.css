@@ -1,0 +1,73 @@
+/* LingoLoop — supplemental styles on top of Tailwind CDN */
+
+.stat-card {
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: #111827;
+  padding: 1.25rem;
+}
+.stat-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.stat-value {
+  margin-top: 0.35rem;
+  font-size: 1.9rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* Nav tabs */
+.tab-btn {
+  color: #94a3b8;
+  transition: all 0.15s ease;
+}
+.tab-btn.active {
+  background: #7c3aed;
+  color: #fff;
+}
+
+/* Quiz option buttons */
+.option-btn {
+  border-radius: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #0b0f1a;
+  padding: 1rem 1.25rem;
+  text-align: left;
+  font-size: 1rem;
+  color: #e2e8f0;
+  transition: all 0.12s ease;
+}
+.option-btn:hover:not(:disabled) {
+  border-color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.08);
+}
+.option-btn:disabled {
+  cursor: default;
+}
+.option-btn.correct {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.14);
+  color: #6ee7b7;
+}
+.option-btn.wrong {
+  border-color: #f43f5e;
+  background: rgba(244, 63, 94, 0.14);
+  color: #fda4af;
+}
+
+/* Blank in grammar sentences */
+.blank {
+  display: inline-block;
+  min-width: 3.5rem;
+  border-bottom: 3px solid #8b5cf6;
+  margin: 0 0.25rem;
+}
+
+@keyframes pop {
+  0% { transform: scale(0.96); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+#quiz-card, #quiz-done { animation: pop 0.2s ease; }
