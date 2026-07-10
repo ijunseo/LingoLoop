@@ -41,24 +41,29 @@
   <main class="mx-auto max-w-5xl px-5 py-8">
     <!-- ============================= DASHBOARD ============================= -->
     <section id="view-dashboard" class="space-y-8">
-      <!-- Stats -->
-      <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div class="stat-card">
-          <p class="stat-label">전체 항목</p>
-          <p id="stat-total" class="stat-value">–</p>
+      <!-- Stats: 4-state spaced-repetition breakdown -->
+      <div class="space-y-3">
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div class="stat-card">
+            <p class="stat-label">미학습</p>
+            <p id="stat-new" class="stat-value text-slate-300">–</p>
+          </div>
+          <div class="stat-card">
+            <p class="stat-label">학습완 (쉬는 중)</p>
+            <p id="stat-fresh" class="stat-value text-sky-400">–</p>
+          </div>
+          <div class="stat-card">
+            <p class="stat-label">학습필요</p>
+            <p id="stat-due" class="stat-value text-amber-400">–</p>
+          </div>
+          <div class="stat-card">
+            <p class="stat-label">완전학습완</p>
+            <p id="stat-mastered" class="stat-value text-emerald-400">–</p>
+          </div>
         </div>
-        <div class="stat-card">
-          <p class="stat-label">마스터</p>
-          <p id="stat-mastered" class="stat-value text-emerald-400">–</p>
-        </div>
-        <div class="stat-card">
-          <p class="stat-label">복습 대기</p>
-          <p id="stat-due" class="stat-value text-amber-400">–</p>
-        </div>
-        <div class="stat-card">
-          <p class="stat-label">마스터율</p>
-          <p id="stat-rate" class="stat-value text-brand-400">–</p>
-        </div>
+        <p class="text-center text-xs text-slate-500">
+          전체 <span id="stat-total">–</span>개 · 마스터율 <span id="stat-rate">–</span>%
+        </p>
       </div>
 
       <!-- Import -->
@@ -85,12 +90,22 @@
         </div>
       </div>
 
-      <!-- Start quiz CTA -->
-      <div class="flex flex-col items-center gap-3 rounded-2xl border border-brand-500/20 bg-gradient-to-br from-brand-600/15 to-transparent p-8 text-center">
-        <p class="text-sm text-slate-300">약점 위주로 15문제가 자동 출제됩니다.</p>
-        <button id="start-quiz-btn"
-          class="rounded-xl bg-white px-7 py-3 text-base font-bold text-ink-900 transition hover:bg-slate-200 active:scale-95">
-          복습 시작 →
+      <!-- Study mode CTAs: 미학습 / 학습필요 / 완전학습완 각각 별도로 연습 -->
+      <div class="grid gap-3 sm:grid-cols-3">
+        <button class="mode-btn" data-mode="new">
+          <span class="mode-btn-icon">🆕</span>
+          <span class="mode-btn-title">새 단어 학습</span>
+          <span class="mode-btn-sub">아직 안 풀어본 항목</span>
+        </button>
+        <button class="mode-btn mode-btn-primary" data-mode="due">
+          <span class="mode-btn-icon">🔁</span>
+          <span class="mode-btn-title">복습</span>
+          <span class="mode-btn-sub">지금 풀 때가 된 항목</span>
+        </button>
+        <button class="mode-btn" data-mode="mastered">
+          <span class="mode-btn-icon">🏆</span>
+          <span class="mode-btn-title">마스터 연습</span>
+          <span class="mode-btn-sub">이미 완료한 항목 (선택)</span>
         </button>
       </div>
     </section>
@@ -101,7 +116,10 @@
       <div class="mb-6">
         <div class="mb-2 flex items-center justify-between text-xs text-slate-400">
           <span id="quiz-progress-label">0 / 0</span>
-          <span id="quiz-type-badge" class="rounded-full bg-ink-700 px-2 py-0.5"></span>
+          <div class="flex items-center gap-2">
+            <span id="quiz-mode-badge" class="rounded-full bg-ink-700 px-2 py-0.5 text-brand-400"></span>
+            <span id="quiz-type-badge" class="rounded-full bg-ink-700 px-2 py-0.5"></span>
+          </div>
         </div>
         <div class="h-1.5 w-full overflow-hidden rounded-full bg-ink-700">
           <div id="quiz-progress-bar" class="h-full w-0 rounded-full bg-brand-500 transition-all duration-300"></div>
@@ -129,7 +147,7 @@
       <!-- Done -->
       <div id="quiz-done" class="hidden rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-10 text-center">
         <p class="text-5xl">🎉</p>
-        <h3 class="mt-4 text-xl font-bold">복습 완료!</h3>
+        <h3 id="quiz-done-title" class="mt-4 text-xl font-bold">완료!</h3>
         <p id="quiz-done-msg" class="mt-1 text-sm text-slate-400"></p>
         <button id="back-dash-btn" class="mt-6 rounded-xl bg-white px-6 py-2.5 font-semibold text-ink-900 hover:bg-slate-200">
           대시보드로
@@ -141,6 +159,11 @@
   <footer class="mx-auto max-w-5xl px-5 pb-10 text-center text-xs text-slate-600">
     generate_profile.py로 <code>learning_profile.md</code>를 뽑아 다음 대화에 주입하세요.
   </footer>
+
+  <!-- 데이터 포맷 확정 전 반복 테스트용: 구석에 조용히 둔 DB 리셋 버튼 -->
+  <button id="reset-db-btn" class="corner-reset" title="테스트용: 단어·문법 데이터 전체 삭제">
+    🗑 DB 리셋
+  </button>
 
   <script src="/tts-util.js"></script>
   <script src="/app.js"></script>

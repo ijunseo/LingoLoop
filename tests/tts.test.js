@@ -6,7 +6,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { cleanSentenceForTTS } = require("../src/frontend/tts-util.js");
+const { cleanSentenceForTTS, cleanPronunciation } = require("../src/frontend/tts-util.js");
 
 test("괄호 안 번역을 제거하고 빈칸을 쉼(，)으로 채운다", () => {
   assert.equal(
@@ -35,4 +35,21 @@ test("괄호가 없고 빈칸만 있어도 동작한다", () => {
 
 test("연속 밑줄(_____)도 하나로 취급한다", () => {
   assert.equal(cleanSentenceForTTS("懂 _____ ！", "了"), "懂 了 ！");
+});
+
+test("cleanPronunciation: 양쪽 슬래시(IPA 관습)를 제거한다", () => {
+  assert.equal(cleanPronunciation("/wɔ/"), "wɔ");
+});
+
+test("cleanPronunciation: 슬래시가 없는 표준 병음은 그대로 둔다", () => {
+  assert.equal(cleanPronunciation("nǐ hǎo"), "nǐ hǎo");
+});
+
+test("cleanPronunciation: 앞뒤 공백과 짝 없는 슬래시도 정리한다", () => {
+  assert.equal(cleanPronunciation("  /xièxie "), "xièxie");
+});
+
+test("cleanPronunciation: 값이 없으면 빈 문자열을 반환한다", () => {
+  assert.equal(cleanPronunciation(undefined), "");
+  assert.equal(cleanPronunciation(""), "");
 });

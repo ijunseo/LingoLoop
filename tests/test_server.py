@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -47,12 +48,15 @@ def vocab(id: str, word: str, meaning: str, *, wrong: int = 0, streak: int = 0,
 
 
 def grammar(id: str, sentence: str, answer: str, options: list[str], *,
+            pronunciation: str = "", target_meaning: str = "",
             wrong: int = 0, streak: int = 0,
             created_at: str = "2026-07-10T00:00:00Z") -> dict[str, Any]:
     return {
         "type": "grammar",
         "id": id,
         "sentence": sentence,
+        "pronunciation": pronunciation,
+        "target_meaning": target_meaning,
         "options": options,
         "correct_option": answer,
         "wrong_count": wrong,
@@ -70,7 +74,10 @@ def import_payload(client: TestClient, payload: str) -> dict[str, Any]:
 
 # --- 테스트 --------------------------------------------------------------- #
 def test_import_chinese_vocab_and_grammar(client: TestClient) -> None:
-    """중국어 단어/문법이 정상 저장되고 인코딩이 보존된다."""
+    """중국어 단어/문법이 정상 저장되고 인코딩이 보존된다.
+
+    막 임포트된 항목은 아직 리뷰된 적이 없으므로 상태가 "new"다 — mode=new로 조회한다.
+    """
     items = [
         vocab("v-wo", "我", "나"),
         grammar("g-shi", "你 ___ 学生。(너는 학생이다.)", "是", ["是", "有", "在", "的"]),
@@ -80,8 +87,9 @@ def test_import_chinese_vocab_and_grammar(client: TestClient) -> None:
 
     stats = client.get("/api/stats").json()
     assert stats["overall"]["total"] == 2
+    assert stats["overall"]["new"] == 2
 
-    quiz = client.get("/api/quiz").json()["items"]
+    quiz = client.get("/api/quiz?mode=new").json()["items"]
     words = {it.get("word") for it in quiz if it["type"] == "vocabulary"}
     assert "我" in words  # 한자가 깨지지 않고 왕복
     vo = next(it for it in quiz if it["id"] == "v-wo")
@@ -96,26 +104,42 @@ def test_import_strips_markdown_fences(client: TestClient) -> None:
     assert counts["vocabulary"] == 1
 
 
-def test_quiz_hard_filter_excludes_mastered(client: TestClient) -> None:
-    """consecutive_correct >= 3 인 항목은 퀴즈에서 제외된다."""
+def test_mastered_items_only_appear_in_mastered_mode(client: TestClient) -> None:
+    """consecutive_correct >= 3 인 항목은 new/due에는 안 나오고 mastered 모드에만 나온다.
+
+    (마스터 판정은 last_reviewed_at 유무와 무관하게 streak만으로 결정된다 —
+    프로필 복원 등으로 streak만 채워진 데이터도 정확히 마스터로 분류돼야 한다.)
+    """
     items = [
-        vocab("v-due", "水", "물", streak=0),
+        vocab("v-new", "水", "물", streak=0),
         vocab("v-mastered", "钱", "돈", streak=3),
     ]
     import_payload(client, json.dumps(items, ensure_ascii=False))
-    ids = {it["id"] for it in client.get("/api/quiz").json()["items"]}
-    assert "v-due" in ids
-    assert "v-mastered" not in ids
+
+    new_ids = {it["id"] for it in client.get("/api/quiz?mode=new").json()["items"]}
+    due_ids = {it["id"] for it in client.get("/api/quiz?mode=due").json()["items"]}
+    mastered_ids = {it["id"] for it in client.get("/api/quiz?mode=mastered").json()["items"]}
+
+    assert "v-new" in new_ids
+    assert "v-mastered" not in new_ids
+    assert "v-mastered" not in due_ids
+    assert "v-mastered" in mastered_ids
+
+
+def test_quiz_mode_rejects_unknown_value(client: TestClient) -> None:
+    """mode가 new/fresh/due/mastered 중 하나가 아니면 422 (FastAPI Literal 검증)."""
+    r = client.get("/api/quiz?mode=bogus")
+    assert r.status_code == 422
 
 
 def test_quiz_sorted_by_weight(client: TestClient) -> None:
-    """wrong_count가 큰 항목이 앞에 온다 (wrong_count*10 가중)."""
+    """wrong_count가 큰 항목이 앞에 온다 (wrong_count*10 가중). 둘 다 미학습 상태."""
     items = [
         vocab("v-low", "对", "맞다", wrong=0),
         vocab("v-high", "给", "주다", wrong=20),
     ]
     import_payload(client, json.dumps(items, ensure_ascii=False))
-    order = [it["id"] for it in client.get("/api/quiz").json()["items"]]
+    order = [it["id"] for it in client.get("/api/quiz?mode=new").json()["items"]]
     assert order.index("v-high") < order.index("v-low")
 
 
@@ -141,7 +165,78 @@ def test_review_unknown_id_returns_404(client: TestClient) -> None:
     assert r.status_code == 404
 
 
+def test_stats_fresh_after_first_correct_review(client: TestClient) -> None:
+    """방금 정답을 맞히면 fresh(학습완: 유예기간 중) 상태가 되고, 아직 마스터는 아니다.
+
+    마스터는 0이어도 연습이 실제로 쌓이고 있다는 걸 대시보드가 보여줘야 한다.
+    """
+    import_payload(client, json.dumps([vocab("v-p", "水", "물")], ensure_ascii=False))
+    stats = client.get("/api/stats").json()
+    assert stats["overall"]["new"] == 1
+    assert stats["overall"]["fresh"] == 0
+
+    client.put("/api/review", json={"id": "v-p", "type": "vocabulary", "correct": True})
+    stats = client.get("/api/stats").json()
+    assert stats["overall"]["fresh"] == 1
+    assert stats["overall"]["new"] == 0
+    assert stats["overall"]["mastered"] == 0
+
+
+def test_compute_status_state_machine() -> None:
+    """4단계 상태 분기(new/mastered/due/fresh)를 직접 검증한다.
+
+    - new: 리뷰된 적 없음.
+    - mastered: streak >= MASTERY_THRESHOLD(last_reviewed_at 유무와 무관).
+    - due: 직전 오답(streak=0)이거나, 정답이었지만 GRACE_DAYS일 유예가 끝남.
+    - fresh: 정답을 맞혀 GRACE_DAYS일 유예기간 이내.
+    """
+    now = datetime.now(timezone.utc)
+    yesterday = (now - timedelta(days=1)).isoformat()
+    long_ago = (now - timedelta(days=server.GRACE_DAYS + 1)).isoformat()
+
+    assert server.compute_status(0, None) == "new"
+    assert server.compute_status(server.MASTERY_THRESHOLD, None) == "mastered"
+    assert server.compute_status(0, yesterday) == "due"
+    assert server.compute_status(1, yesterday) == "fresh"
+    assert server.compute_status(2, long_ago) == "due"
+
+
 def test_import_empty_is_400(client: TestClient) -> None:
     """빈 입력은 400."""
     r = client.post("/api/import", content="   ", headers={"Content-Type": "text/plain"})
     assert r.status_code == 400
+
+
+def test_grammar_pronunciation_round_trips(client: TestClient) -> None:
+    """문법 항목의 pronunciation·target_meaning이 저장/조회에서 보존된다.
+
+    (的/得처럼 발음이 같은 문법조사는 pronunciation을 비워 구식 한자 4지선다로
+    폴백시키는 게 의도된 동작이므로, 값이 있는 케이스만 이 테스트로 검증한다.)
+    """
+    items = [
+        grammar(
+            "g-shi", "你 ___ 学生。(너는 학생이다.)", "是", ["是", "有", "在", "的"],
+            pronunciation="shì", target_meaning="~이다 (be동사)",
+        ),
+    ]
+    import_payload(client, json.dumps(items, ensure_ascii=False))
+    item = next(it for it in client.get("/api/quiz?mode=new").json()["items"] if it["id"] == "g-shi")
+    assert item["pronunciation"] == "shì"
+    assert item["target_meaning"] == "~이다 (be동사)"
+    assert item["correct_option"] == "是"  # 빈칸에 채울 한자는 그대로 유지
+
+
+def test_reset_clears_all_data(client: TestClient) -> None:
+    """/api/reset은 vocabulary·grammar를 모두 비운다."""
+    items = [
+        vocab("v-r1", "我", "나"),
+        grammar("g-r1", "你 ___ 学生。(너는 학생이다.)", "是", ["是", "有", "在", "的"]),
+    ]
+    import_payload(client, json.dumps(items, ensure_ascii=False))
+    assert client.get("/api/stats").json()["overall"]["total"] == 2
+
+    r = client.post("/api/reset")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    assert client.get("/api/stats").json()["overall"]["total"] == 0
+    assert client.get("/api/quiz").json()["items"] == []

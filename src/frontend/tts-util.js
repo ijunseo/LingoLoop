@@ -19,7 +19,24 @@ function cleanSentenceForTTS(sentence, fill) {
     .trim();
 }
 
+/**
+ * 발음 표기를 화면에 보여주기 좋은 형태로 정리한다.
+ *
+ * LLM이 IPA 관습(예: "/wɔ/")으로 슬래시를 씌워 보내는 경우를 방어적으로
+ * 걷어낸다. 표준 병음(예: "nǐ hǎo")은 슬래시가 없으므로 그대로 통과한다.
+ *
+ * @param {string} raw - 원본 발음 문자열(양끝에 "/"가 붙어있을 수 있음).
+ * @returns {string} 슬래시와 불필요한 공백이 제거된 문자열.
+ */
+function cleanPronunciation(raw) {
+  return String(raw || "")
+    .trim()
+    .replace(/^\/+/, "")   // 앞쪽 슬래시 제거
+    .replace(/\/+$/, "")   // 뒤쪽 슬래시 제거
+    .trim();
+}
+
 // 브라우저에서는 전역 함수, Node(테스트)에서는 module.exports 로 노출.
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { cleanSentenceForTTS };
+  module.exports = { cleanSentenceForTTS, cleanPronunciation };
 }

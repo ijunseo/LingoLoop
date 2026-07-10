@@ -29,6 +29,45 @@
   color: #fff;
 }
 
+/* Study-mode CTA buttons (새 단어 학습 / 복습 / 마스터 연습) */
+.mode-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #111827;
+  padding: 1.25rem 1rem;
+  text-align: center;
+  color: #e2e8f0;
+  transition: all 0.15s ease;
+}
+.mode-btn:hover {
+  border-color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.08);
+  transform: translateY(-1px);
+}
+.mode-btn-icon {
+  font-size: 1.5rem;
+}
+.mode-btn-title {
+  font-size: 1rem;
+  font-weight: 700;
+}
+.mode-btn-sub {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+/* 복습(due)이 매일 쓰는 기본 동작이라 시각적으로 가장 강조한다 */
+.mode-btn-primary {
+  border-color: rgba(139, 92, 246, 0.4);
+  background: linear-gradient(160deg, rgba(124, 58, 237, 0.18), transparent 70%);
+}
+.mode-btn-primary .mode-btn-title {
+  color: #c4b5fd;
+}
+
 /* Quiz option buttons */
 .option-btn {
   border-radius: 0.9rem;
@@ -37,8 +76,19 @@
   padding: 1rem 1.25rem;
   text-align: left;
   font-size: 1rem;
+  line-height: 1.6;       /* 병음 성조 기호(ā é ǒ 등)가 위아래로 잘리지 않도록 여유 확보 */
+  white-space: normal;    /* 절대 말줄임/클리핑 하지 않음 */
+  word-break: keep-all;   /* 병음 음절이 중간에서 끊기지 않도록 */
   color: #e2e8f0;
   transition: all 0.12s ease;
+}
+
+/* 발음(병음) 매칭 보기: 성조 기호가 잘 보이도록 크고 여유 있게 */
+.option-btn.pron {
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-align: center;
 }
 .option-btn:hover:not(:disabled) {
   border-color: #8b5cf6;
@@ -58,7 +108,7 @@
   color: #fda4af;
 }
 
-/* Blank in grammar sentences */
+/* Blank in grammar sentences (구식 빈칸-한자 폴백 형식에서만 사용) */
 .blank {
   display: inline-block;
   min-width: 3.5rem;
@@ -66,8 +116,71 @@
   margin: 0 0.25rem;
 }
 
+/* 발음 매칭 형식의 문법 문제: 빈칸을 가리지 않고 정답 한자를 그대로 보여주되
+   눈에 띄게 강조한다 — 4지선다는 이 글자의 "발음"을 맞히는 것이라, 한자
+   자체는 이미 공개해도 문제가 없다(오히려 발음에만 집중하게 해준다). */
+.target-word {
+  font-weight: 800;
+  color: #c4b5fd;
+  border-bottom: 3px solid #8b5cf6;
+  padding: 0 0.15em;
+}
+
 @keyframes pop {
   0% { transform: scale(0.96); opacity: 0; }
   100% { transform: scale(1); opacity: 1; }
 }
 #quiz-card, #quiz-done { animation: pop 0.2s ease; }
+
+/* TTS 사용 불가 안내 배너 */
+.tts-warning {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  max-width: 92%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 15px;
+  border-radius: 12px;
+  background: #1a2233;
+  color: #fda4af;
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  z-index: 50;
+}
+.tts-warning b { color: #fff; }
+.tts-warning button {
+  flex-shrink: 0;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* 데이터 포맷 확정 전까지 반복 테스트용 DB 리셋 — 눈에 안 띄게 구석에 */
+.corner-reset {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  z-index: 30;
+  font-size: 11px;
+  color: #64748b;
+  background: rgba(17, 24, 39, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.corner-reset:hover {
+  opacity: 1;
+  color: #fda4af;
+  border-color: rgba(244, 63, 94, 0.4);
+}

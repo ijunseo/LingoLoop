@@ -10,11 +10,20 @@ LLM과의 대화에서 얻은 언어 학습 데이터를 구조화하고, 약점
   다음 대화에 넣어주면 AI가 내가 자주 틀리는 단어·패턴을 알아서 다시 활용합니다.
 
 > 🇨🇳 **이 인스턴스는 중국어(만다린) 학습용으로 설정되어 있습니다.**
-> 단어 = 한자(汉字), 발음 = 병음/IPA, 뜻 = 모국어(예: 한국어), 문법 = 중국어 예문.
+> 단어 = 한자(汉字), 발음 = **표준 병음(성조 기호 포함, 사전식 표기)**, 뜻 = 모국어(예: 한국어),
+> 문법 = 중국어 예문.
 > 발음 재생(TTS)은 `zh-CN`으로 동작합니다 — 소리가 나려면 OS에 중국어 음성이
 > 설치돼 있어야 합니다 (Windows: 설정 → 시간 및 언어 → 언어에서 중국어 음성 추가).
 > 다른 언어로 바꾸려면 [`src/frontend/app.js`](src/frontend/app.js)의 `TTS_LANG`
 > 한 줄만 수정하세요.
+>
+> **단어·문법 모두 100% 발음 매칭 방식입니다.** 한자(단어는 단어 자체, 문법은
+> 문장 속 강조된 글자)를 그대로 보여주고, 뜻도 같이 공개한 뒤, 발음(병음) 4지선다로
+> 답을 고르게 합니다 — 한자 자체나 뜻을 유추하는 건 이미 되는 학습자(다년간 한자
+> 문화권 학습·거주 경험 등)에게는, 진짜 병목이 "이 글자를 실제로 어떻게 읽는가"이기
+> 때문입니다. 그래서 뜻 맞히기가 아니라 **오직 읽기(발음)** 만 시험합니다.
+> (예외: 的/地/得처럼 발음이 완전히 같은 문법조사는 병음으로 구별이 불가능해서
+> 자동으로 기존 한자 4지선다 방식으로 대체됩니다.)
 
 ---
 
@@ -58,6 +67,12 @@ uv run python src/scripts/generate_profile.py
 
 ### Step 2 — 자유 대화 후 추출
 대화가 끝나면, AI에게 아래 프롬프트를 줘서 오늘 배운 내용을 JSON으로 뽑습니다.
+핵심은 두 가지입니다:
+1. `pronunciation`은 **사전에 나오는 표준 병음(성조 기호 포함)** 이어야 합니다 —
+   IPA나 슬래시(`/.../`)로 오면 퀴즈 화면에서 어색하게 표시됩니다.
+2. **문법도 문장 통째로 추출**하고, 문장 전체 뜻과 빈칸 글자 하나의 개별 뜻을
+   둘 다 공개합니다. 뜻은 이미 다 알려주니 학습자는 오직 **그 글자를 어떻게
+   읽는지(발음)** 에만 집중하면 됩니다.
 
 ```
 [System Instruction: LingoLoop Universal Data Extractor]
@@ -65,17 +80,64 @@ Extract all key vocabulary and grammar elements from our conversation
 today and format them into a single JSON list. Return ONLY the pure JSON block
 without any explanations, greetings, or markdown formatting.
 
+# Learner context
+The learner can already read/guess Hanzi shapes and meanings reasonably well
+(years of Kanji exposure). Seeing a multiple-choice list of Hanzi lets them
+skip straight to "oh, I recognize this character" without ever working out
+the pronunciation — that's a shortcut we want to eliminate. The real
+bottleneck is knowing the Mandarin PRONUNCIATION of a given character/word.
+So for every item, meaning is freely revealed, and "pronunciation" is the
+one thing being tested.
+
 # Schema (one object per item):
 - type: strictly "vocabulary" or "grammar".
-- id: random UUID v4.
-- For "vocabulary": word, pronunciation (IPA/pinyin), meaning (the correct answer).
-- For "grammar": sentence (with a ___ blank for the target word/phrase).
-- options: 4 multiple-choice strings; exactly one is correct.
-- correct_option: must exactly match one of options
-  (for vocabulary = the meaning; for grammar = the word that fills ___).
+- id: random UUID v4 (unique per item).
+- pronunciation (BOTH types): STANDARD DICTIONARY PINYIN WITH TONE MARKS —
+  the exact convention used in Chinese-English dictionaries (e.g. Pleco,
+  MDBG). NOT IPA, NOT tone numbers, NOT wrapped in slashes.
+    good: "nǐ hǎo"     good: "xièxie"     good: "shì"
+    bad:  "/ni˨˩˦ xɑʊ˨˩˦/"   bad: "ni3 hao3"   bad: "/wɔ/"
+  Use the tone diacritics ā á ǎ à / ē é ě è / ī í ǐ ì / ō ó ǒ ò /
+  ū ú ǔ ù / ǖ ǘ ǚ ǜ. Multi-character words: separate syllables with a
+  space, e.g. "名字" → "míngzi", "好久" → "hǎojiǔ".
+  EXCEPTION: if the target character is a grammatical particle that is a
+  true homophone of other candidates (的 / 地 / 得 are ALL pronounced "de"),
+  pronunciation alone can't test it meaningfully — leave this field "" and
+  the app will automatically fall back to a Hanzi multiple-choice question
+  for that one item instead.
+- For "vocabulary":
+  - word: the Hanzi, e.g. "你好".
+  - meaning: meaning in the learner's native language (Korean).
+- For "grammar" — extract the FULL sentence, not just an isolated pattern:
+  - sentence: the whole sentence with a ___ marking exactly one target
+    word/phrase, followed by the sentence's overall meaning in parentheses.
+    e.g. "你 ___ 学生。(너는 학생이다.)"
+  - target_meaning: the meaning/grammatical function of ONLY the blanked
+    word (not the whole sentence), e.g. "~이다 (be동사)". This is what lets
+    the learner ignore meaning entirely and focus purely on pronunciation.
+- options: 4 multiple-choice Hanzi strings (kept as a fallback format for
+  the homophone-particle case above); exactly one is correct.
+- correct_option: the Hanzi that fills the blank (vocabulary: not used for
+  grading, just informational; grammar: the word substituted into ___).
 - wrong_count: 0
 - consecutive_correct: 0
 - created_at: ISO 8601 timestamp.
+
+# Worked examples
+{"type":"vocabulary","id":"<uuid>","word":"谢谢","pronunciation":"xièxie",
+ "meaning":"고맙다","options":["미안하다","괜찮다","고맙다","안녕"],
+ "correct_option":"고맙다","wrong_count":0,"consecutive_correct":0,
+ "created_at":"2026-07-10T00:00:00Z"}
+
+{"type":"grammar","id":"<uuid>","sentence":"你 ___ 学生。(너는 학생이다.)",
+ "pronunciation":"shì","target_meaning":"~이다 (be동사)",
+ "options":["是","有","在","的"],"correct_option":"是",
+ "wrong_count":0,"consecutive_correct":0,"created_at":"2026-07-10T00:00:00Z"}
+
+{"type":"grammar","id":"<uuid>","sentence":"唱 ___ 很好听。(노래 부르는 게 진짜 듣기 좋다.)",
+ "pronunciation":"","target_meaning":"",
+ "options":["的","地","得","了"],"correct_option":"得",
+ "wrong_count":0,"consecutive_correct":0,"created_at":"2026-07-10T00:00:00Z"}
 ```
 
 ### Step 3 — LingoLoop에 주입
@@ -83,21 +145,46 @@ without any explanations, greetings, or markdown formatting.
 누릅니다. 마크다운 백틱(```` ```json ````)은 백엔드가 자동으로 제거합니다. ✨
 
 ### Step 4 — 연습 & 마스터
-**복습 시작**을 눌러 맞춤형 4지선다 퀴즈로 약점을 극복합니다. 문제 출제 시
-발음이 자동 재생됩니다(Web Speech API).
+대시보드에는 학습 상태별로 **세 개의 버튼**이 있습니다 — 아래 "학습 상태" 표 참고.
+**복습**이 매일 쓰는 기본 버튼입니다. 단어·문법 모두 한자(문법은 문장 속 강조된
+글자)와 뜻을 그대로 보여주고 **발음(병음)만 4지선다로** 묻습니다 — 정답을 미리
+들려주지 않으니 🔊 버튼으로 힌트를 듣거나, 답을 고른 뒤 자동 재생되는 정답
+발음으로 확인하세요. **"다음" 버튼을 눌러야 다음 문제로 넘어갑니다** —
+정답/오답 상관없이 발음을 충분히 들을 시간이 있습니다.
+
+> 的/地/得 같은 동음이의 문법조사는 병음으로 구별할 수 없어서, 이런 항목만
+> 예외적으로 기존 한자 4지선다 방식으로 출제됩니다.
 
 그리고 다시 **Step 1**로 — 이제 프로필이 더 정교해져 있습니다. 🔁
 
 ---
 
-## 🧠 동작 원리
+## 🧠 학습 상태 (4단계 간격 반복)
 
-| 규칙 | 동작 |
+LingoLoop은 가벼운 간격 반복(SRS) 모델로 항목을 4가지 상태로 관리합니다.
+항목마다 매번 다시 시험 보는 게 아니라, **정답을 맞히면 며칠 쉬었다가** 다시
+나타나서 "진짜 기억하는지"를 확인합니다.
+
+| 상태 | 뜻 | 퀴즈에 나오는 조건 |
+|---|---|---|
+| 🆕 **미학습(new)** | 한 번도 안 풀어본 항목 | **새 단어 학습** 버튼 |
+| 💤 **학습완(fresh)** | 방금 정답을 맞혀 유예기간(3일) 동안 쉬는 중 | 어디에도 안 나옴(의도적) |
+| 🔁 **학습필요(due)** | 방금 오답이었거나, 유예기간이 끝나 다시 확인할 때 | **복습** 버튼 |
+| 🏆 **완전학습완(mastered)** | 별도 세션 3번 연속으로 첫 시도 정답 | **마스터 연습** 버튼(선택) |
+
+상태 전이: `미학습 --정답--> 학습완 --(3일 경과)--> 학습필요 --정답--> 학습완(반복, 3번째면 완전학습완) / --오답--> 학습필요(유예 없이 즉시)`
+
+**완전학습완도 틀리면 되돌아갑니다** — 마스터 연습에서 오답을 내면 학습필요로
+다시 떨어집니다(진짜 안 까먹었는지 계속 확인).
+
+| 그 외 규칙 | 동작 |
 |---|---|
-| **하드 필터** | `consecutive_correct < 3`(아직 미마스터)인 항목만 퀴즈에 나옵니다. |
-| **가중 정렬** | 우선순위 = `wrong_count * 10 + 최신성(0~100)`; 상위 15개를 출제. |
+| **가중 정렬** | 같은 모드 안에서 우선순위 = `wrong_count * 10 + 최신성(0~100)`; 상위 15개를 출제. |
 | **1세션 1카운트** | 한 세션에서 같은 문제를 여러 번 틀려도 `wrong_count`는 최초 1회만 +1 (프론트 `Set` 방어). |
-| **마스터** | 첫 시도 정답을 3연속 달성하면 해당 항목은 퀴즈에서 제외됩니다. |
+
+대시보드 좌하단 구석의 **🗑 DB 리셋** 버튼은 데이터 포맷을 이것저것 바꿔가며
+테스트할 때 쓰는 개발용 기능입니다 — 클릭하면 확인 후 단어·문법을 전부
+삭제합니다(되돌릴 수 없음).
 
 ---
 
@@ -133,6 +220,7 @@ LingoLoop/
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | `POST` | `/api/import` | 마크다운 백틱 제거 → `json.loads` → 테이블에 upsert. |
-| `GET` | `/api/quiz` | 필터 + 가중 정렬된 15문항 세트. |
-| `PUT` | `/api/review` | 채점 결과 저장 (`{id, type, correct}`). |
-| `GET` | `/api/stats` | 대시보드 통계 + 마스터율. |
+| `GET` | `/api/quiz?mode=new\|due\|mastered` | 해당 학습 상태 + 가중 정렬된 15문항 세트(기본 `due`). |
+| `PUT` | `/api/review` | 채점 결과 저장 (`{id, type, correct}`); `last_reviewed_at` 갱신. |
+| `GET` | `/api/stats` | 4가지 학습 상태별 개수 + 마스터율. |
+| `POST` | `/api/reset` | 단어·문법 전체 삭제(개발용, 되돌릴 수 없음). |

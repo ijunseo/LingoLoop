@@ -33,6 +33,20 @@ $$(".tab-btn").forEach((b) => b.addEventListener("click", () => showView(b.datas
 // 해당 언어의 OS 음성이 설치돼 있어야 소리가 난다.
 const TTS_LANG = "zh-CN"; // 중국어(만다린) 학습용
 
+/** @type {SpeechSynthesisVoice[]} 캐시된 음성 목록. */
+let VOICES = [];
+
+/** 브라우저에서 음성 목록을 다시 읽어 캐시한다(비동기 로드 대응). */
+function refreshVoices() {
+  if ("speechSynthesis" in window) VOICES = window.speechSynthesis.getVoices() || [];
+}
+
+/** @returns {SpeechSynthesisVoice|undefined} TTS_LANG에 맞는 음성. */
+function pickVoice() {
+  const base = TTS_LANG.split("-")[0].toLowerCase();
+  return VOICES.find((v) => v.lang && v.lang.toLowerCase().startsWith(base));
+}
+
 /**
  * 주어진 텍스트를 TTS_LANG 언어로 읽는다.
  * @param {string} text - 읽을 텍스트.
@@ -43,10 +57,7 @@ function speak(text) {
   const u = new SpeechSynthesisUtterance(text);
   u.lang = TTS_LANG;
   u.rate = 0.9;
-  const base = TTS_LANG.split("-")[0].toLowerCase();
-  const voice = window.speechSynthesis
-    .getVoices()
-    .find((v) => v.lang && v.lang.toLowerCase().startsWith(base));
+  const voice = pickVoice();
   if (voice) u.voice = voice;
   window.speechSynthesis.speak(u);
 }
@@ -60,21 +71,55 @@ function speakSentence(sentence, fill) {
   speak(cleanSentenceForTTS(sentence, fill));
 }
 
-// 일부 브라우저는 음성 목록을 비동기로 로드하므로 미리 warm-up 한다.
-if ("speechSynthesis" in window) window.speechSynthesis.getVoices();
+let ttsWarned = false;
+/**
+ * 사용 가능한 (중국어) 음성이 없으면 안내 배너를 한 번 띄운다.
+ * VS Code 내장 미리보기 등에서는 음성 엔진이 없어 소리가 나지 않는다.
+ */
+function checkTTSHealth() {
+  if (ttsWarned) return;
+  refreshVoices();
+  const ok = "speechSynthesis" in window && VOICES.length > 0 && pickVoice();
+  if (ok) return;
+  ttsWarned = true;
+  const bar = document.createElement("div");
+  bar.className = "tts-warning";
+  bar.innerHTML =
+    "⚠️ 이 환경에서 중국어 음성을 찾지 못했어요. VS Code 미리보기가 아니라 " +
+    "<b>Chrome / Edge</b>에서 <b>http://127.0.0.1:8000</b> 을 여세요. " +
+    "(Edge는 중국어 음성 내장) ";
+  const close = document.createElement("button");
+  close.textContent = "✕";
+  close.setAttribute("aria-label", "닫기");
+  close.addEventListener("click", () => bar.remove());
+  bar.appendChild(close);
+  document.body.appendChild(bar);
+}
+
+// 음성 목록은 비동기로 로드되므로 즉시 + voiceschanged + 지연 후 재확인한다.
+if ("speechSynthesis" in window) {
+  refreshVoices();
+  window.speechSynthesis.onvoiceschanged = refreshVoices;
+  setTimeout(() => { refreshVoices(); checkTTSHealth(); }, 2000);
+}
 
 // --------------------------------------------------------------------------- //
 // 대시보드: 통계 + 데이터 주입 (Dashboard)
 // --------------------------------------------------------------------------- //
-/** 통계 API를 호출해 대시보드 숫자들을 갱신한다. @returns {Promise<void>} */
+/**
+ * 통계 API를 호출해 대시보드 숫자들을 갱신한다.
+ * 4가지 학습 상태(new/fresh/due/mastered)를 그대로 타일에 반영한다.
+ * @returns {Promise<void>}
+ */
 async function loadStats() {
   try {
     const r = await fetch("/api/stats");
     const s = await r.json();
-    $("#stat-total").textContent = s.overall.total;
+    $("#stat-new").textContent = s.overall.new;
+    $("#stat-fresh").textContent = s.overall.fresh;
+    $("#stat-due").textContent = s.overall.due;
     $("#stat-mastered").textContent = s.overall.mastered;
-    $("#stat-due").textContent =
-      (s.vocabulary?.due || 0) + (s.grammar?.due || 0);
+    $("#stat-total").textContent = s.overall.total;
     $("#stat-rate").textContent = s.overall.mastery_rate + "%";
   } catch (e) {
     console.error(e);
@@ -129,7 +174,7 @@ const SAMPLE_ITEMS = [
     type: "vocabulary",
     id: crypto.randomUUID(),
     word: "我",
-    pronunciation: "/wɔ/",
+    pronunciation: "wǒ", // 표준 병음(사전식), 슬래시·IPA 금지
     meaning: "나",
     options: ["너", "나", "그", "우리"],
     correct_option: "나",
@@ -149,20 +194,52 @@ const SAMPLE_ITEMS = [
   },
 ];
 
+/**
+ * DB의 vocabulary·grammar를 전부 지운다(개발용, 되돌릴 수 없음).
+ * 데이터 포맷을 이것저것 바꿔가며 테스트할 때 쓰는 임시 기능이라 구석에 뒀다.
+ */
+$("#reset-db-btn").addEventListener("click", async () => {
+  const btn = $("#reset-db-btn");
+  if (!confirm("단어·문법 데이터를 전부 삭제할까요? 되돌릴 수 없어요.")) return;
+  try {
+    const r = await fetch("/api/reset", { method: "POST" });
+    if (!r.ok) throw new Error("reset failed");
+    quiz.queue = []; // 진행 중이던 퀴즈가 참조하던 항목도 함께 무효화
+    btn.textContent = "✅ 초기화됨";
+    setTimeout(() => { btn.textContent = "🗑 DB 리셋"; }, 1500);
+    if (!$("#view-dashboard").classList.contains("hidden")) loadStats();
+  } catch (e) {
+    console.error(e);
+    btn.textContent = "❌ 실패";
+    setTimeout(() => { btn.textContent = "🗑 DB 리셋"; }, 1500);
+  }
+});
+
 // --------------------------------------------------------------------------- //
 // 퀴즈 엔진 (Quiz engine)
 // --------------------------------------------------------------------------- //
+/** 학습 모드별 한글 라벨(대시보드 버튼·퀴즈 배지·완료 메시지에서 공용으로 사용). */
+const MODE_LABEL = { new: "새 단어 학습", due: "복습", mastered: "마스터 연습" };
+
 /**
  * 진행 중인 퀴즈 세션 상태.
- * @type {{queue: object[], uniqueTotal: number, solved: number,
- *         everWrong: Set<string>, locked: boolean}}
+ * @type {{mode: string, queue: object[], uniqueTotal: number, solved: number,
+ *         everWrong: Set<string>, locked: boolean,
+ *         pronPool: string[], grammarPronPool: string[],
+ *         currentCorrect: string, currentItem: object|null, firstTryCorrect: number}}
  */
 const quiz = {
+  mode: "due",            // "new" | "due" | "mastered"
   queue: [],
   uniqueTotal: 0,
   solved: 0,
   everWrong: new Set(), // 1세션 1카운트 방어용
   locked: false,
+  pronPool: [],          // 단어 발음 오답 후보 풀
+  grammarPronPool: [],   // 문법 발음 오답 후보 풀(단어 풀과 분리)
+  currentCorrect: "",    // 현재 문항의 정답 텍스트
+  currentItem: null,     // 현재 화면에 표시 중인 문항(큐 변형과 무관하게 고정)
+  firstTryCorrect: 0,    // 이번 세션에서 첫 시도에 맞힌 개수(마스터 진행에 반영됨)
 };
 
 /**
@@ -179,17 +256,66 @@ function shuffle(arr) {
   return a;
 }
 
-/** 퀴즈 데이터를 받아 세션을 초기화하고 첫 문항을 그린다. @returns {Promise<void>} */
-async function startQuiz() {
+/**
+ * 발음 4지선다 보기를 만든다. 정답 + pool에서 뽑은 오답(최대 3개).
+ * 단어는 quiz.pronPool, 문법은 quiz.grammarPronPool에서 오답을 뽑는다
+ * (서로 섞이지 않도록 종류별로 별도 풀을 쓴다).
+ * @param {string} correct - 정답 발음 텍스트.
+ * @param {string[]} pool - 오답 후보 발음 풀.
+ * @returns {string[]} 섞인 발음 보기(최대 4개).
+ */
+function pronOptions(correct, pool) {
+  const distractors = pool.filter((p) => p && p !== correct);
+  return shuffle([correct, ...shuffle(distractors).slice(0, 3)]);
+}
+
+/**
+ * 서버에서 받은 문항을 화면 표시용으로 정규화한다.
+ * 발음 필드는 슬래시(IPA 표기 관습)를 제거해 사전식으로 다듬는다.
+ * @param {object} item - /api/quiz가 내려준 원본 문항.
+ * @returns {object} 정규화된 문항.
+ */
+function normalizeItem(item) {
+  if (item.pronunciation) {
+    return { ...item, pronunciation: cleanPronunciation(item.pronunciation) };
+  }
+  return item;
+}
+
+/**
+ * 퀴즈 데이터를 받아 세션을 초기화하고 첫 문항을 그린다.
+ * @param {"new"|"due"|"mastered"} mode - 어떤 학습 상태의 항목을 출제할지.
+ * @returns {Promise<void>}
+ */
+async function startQuiz(mode) {
+  quiz.mode = mode;
   showView("quiz");
+  $("#quiz-mode-badge").textContent = MODE_LABEL[mode] || mode;
   $("#quiz-done").classList.add("hidden");
   $("#quiz-card").classList.remove("hidden");
-  const r = await fetch("/api/quiz");
+  const r = await fetch(`/api/quiz?mode=${encodeURIComponent(mode)}`);
   const data = await r.json();
-  quiz.queue = data.items;
-  quiz.uniqueTotal = data.items.length;
+  quiz.queue = data.items.map(normalizeItem);
+  quiz.uniqueTotal = quiz.queue.length;
   quiz.solved = 0;
   quiz.everWrong = new Set();
+  quiz.firstTryCorrect = 0;
+  // 발음 오답 후보 풀(중복 제거, 정규화된 값). 단어/문법은 서로 섞이지 않게 분리.
+  quiz.pronPool = [
+    ...new Set(
+      quiz.queue
+        .filter((i) => i.type === "vocabulary" && i.pronunciation)
+        .map((i) => i.pronunciation),
+    ),
+  ];
+  quiz.grammarPronPool = [
+    ...new Set(
+      quiz.queue
+        .filter((i) => i.type === "grammar" && i.pronunciation)
+        .map((i) => i.pronunciation),
+    ),
+  ];
+  checkTTSHealth();
   if (!quiz.queue.length) {
     finishQuiz(true);
     return;
@@ -201,6 +327,7 @@ async function startQuiz() {
 function renderCurrent() {
   quiz.locked = false;
   const item = quiz.queue[0];
+  quiz.currentItem = item; // 큐가 이후 변형돼도 "지금 화면" 참조는 고정
   $("#next-btn").classList.add("hidden");
 
   // 진행률
@@ -209,28 +336,64 @@ function renderCurrent() {
   $("#quiz-progress-label").textContent = `${quiz.solved} / ${quiz.uniqueTotal}`;
   $("#quiz-type-badge").textContent = item.type === "vocabulary" ? "단어" : "문법";
 
-  // 문제 본문
+  // 문제 본문 + 보기 구성. quiz.currentCorrect에 정답 텍스트를 담는다.
   const q = $("#quiz-question");
-  if (item.type === "vocabulary") {
-    $("#quiz-prompt").textContent = "알맞은 뜻을 고르세요";
+  let options;
+  let isPron = false; // true면 보기가 병음(발음) 텍스트 → 가독성용 스타일 적용
+  if (item.type === "vocabulary" && item.pronunciation) {
+    // 발음 매칭: 한자(+뜻)를 보여주고 올바른 발음을 고르게 한다.
+    // 한자는 유추 가능하다는 전제하에, 목표인 '발음'에 집중시킨다.
+    // 정답을 흘리지 않도록 출제 시 자동 재생하지 않는다(🔊로 힌트 청취 가능).
+    $("#quiz-prompt").textContent = "발음을 고르세요 (🔊로 들어볼 수 있어요)";
     q.innerHTML = `
       <div class="text-5xl font-extrabold tracking-tight">${escapeHtml(item.word)}</div>
-      ${item.pronunciation ? `<div class="mt-2 font-mono text-brand-400">${escapeHtml(item.pronunciation)}</div>` : ""}
+      <div class="mt-3 text-lg text-slate-400">${escapeHtml(item.meaning || "")}</div>
     `;
+    quiz.currentCorrect = item.pronunciation;
+    options = pronOptions(item.pronunciation, quiz.pronPool);
+    isPron = true;
+  } else if (item.type === "vocabulary") {
+    // 발음 데이터가 없으면 기존 방식(뜻 고르기)으로 폴백.
+    $("#quiz-prompt").textContent = "알맞은 뜻을 고르세요";
+    q.innerHTML = `<div class="text-5xl font-extrabold tracking-tight">${escapeHtml(item.word)}</div>`;
+    quiz.currentCorrect = item.correct_option;
+    options = shuffle(item.options);
     speak(item.word);
+  } else if (item.pronunciation) {
+    // 발음 매칭: 빈칸을 "가리지 않고" 정답 한자를 그대로 보여준다(강조 표시).
+    // 한자 모양으로 답을 찍는 걸 막기 위해, 4지선다는 한자가 아니라 그 글자의
+    // 발음(병음)이다. 문장 전체 뜻은 원문의 괄호 번역을 그대로 보여주고,
+    // 강조된 글자만의 개별 뜻/문법 기능도 따로 보여준다.
+    $("#quiz-prompt").textContent = "강조된 글자의 발음을 고르세요 (🔊로 들어볼 수 있어요)";
+    const filled = escapeHtml(item.sentence).replace(
+      /_+/g,
+      `<span class="target-word">${escapeHtml(item.correct_option)}</span>`,
+    );
+    q.innerHTML = `
+      <div class="text-2xl font-semibold leading-relaxed">${filled}</div>
+      ${item.target_meaning
+        ? `<div class="mt-3 text-base text-slate-400">${escapeHtml(item.correct_option)} → ${escapeHtml(item.target_meaning)}</div>`
+        : ""}
+    `;
+    quiz.currentCorrect = item.pronunciation;
+    options = pronOptions(item.pronunciation, quiz.grammarPronPool);
+    isPron = true;
   } else {
+    // 발음 데이터가 없으면 기존 방식(빈칸에 맞는 한자 고르기)으로 폴백.
     $("#quiz-prompt").textContent = "빈칸에 알맞은 것을 고르세요";
     const html = escapeHtml(item.sentence).replace(/_+/g, '<span class="blank"></span>');
     q.innerHTML = `<div class="text-2xl font-semibold leading-relaxed">${html}</div>`;
+    quiz.currentCorrect = item.correct_option;
+    options = shuffle(item.options);
     speakSentence(item.sentence, "，"); // 빈칸은 짧은 쉼으로 읽음
   }
 
-  // 보기(정답 포함 4지선다, 순서 섞기)
+  // 보기 렌더링(정답 포함 4지선다)
   const box = $("#quiz-options");
   box.innerHTML = "";
-  shuffle(item.options).forEach((opt) => {
+  options.forEach((opt) => {
     const btn = document.createElement("button");
-    btn.className = "option-btn";
+    btn.className = isPron ? "option-btn pron" : "option-btn";
     btn.textContent = opt;
     btn.addEventListener("click", () => selectOption(btn, opt, item));
     box.appendChild(btn);
@@ -244,6 +407,9 @@ function renderCurrent() {
  * 오답: 세션 내 최초 1회만 wrong_count +1을 서버에 보내고(1세션 1카운트),
  *       해당 항목을 큐 뒤로 보내 다시 풀게 한다.
  *
+ * 정답/오답 관계없이 정답 발음을 들려주고, 자동으로 넘어가지 않는다 —
+ * 사용자가 발음을 다 듣고 "다음" 버튼을 눌러야 다음 문항으로 진행된다.
+ *
  * @param {HTMLButtonElement} btn - 클릭된 보기 버튼.
  * @param {string} opt - 선택한 보기 텍스트.
  * @param {object} item - 현재 문항.
@@ -251,26 +417,28 @@ function renderCurrent() {
 async function selectOption(btn, opt, item) {
   if (quiz.locked) return;
   quiz.locked = true;
-  const isCorrect = opt === item.correct_option;
+  const correct = quiz.currentCorrect;
+  const isCorrect = opt === correct;
 
   // 정답 공개
   $$("#quiz-options .option-btn").forEach((b) => {
     b.disabled = true;
-    if (b.textContent === item.correct_option) b.classList.add("correct");
+    if (b.textContent === correct) b.classList.add("correct");
   });
   if (!isCorrect) btn.classList.add("wrong");
+
+  // 정답/오답 관계없이 정답 발음을 들려준다(맞혀도 틀려도 발음은 들어야 한다).
+  if (item.type === "vocabulary") speak(item.word);
+  else speakSentence(item.sentence, item.correct_option);
 
   if (isCorrect) {
     if (!quiz.everWrong.has(item.id)) {
       // 첫 시도 정답 → 마스터 카운트 반영
       sendReview(item, true);
-    }
-    if (item.type === "grammar") {
-      speakSentence(item.sentence, item.correct_option);
+      quiz.firstTryCorrect += 1;
     }
     quiz.solved += 1;
     quiz.queue.shift(); // 푼 항목 제거
-    setTimeout(nextStep, 650);
   } else {
     if (!quiz.everWrong.has(item.id)) {
       // 1세션 1카운트: 최초 오답 1회만 DB에 반영
@@ -280,8 +448,9 @@ async function selectOption(btn, opt, item) {
     // 이 항목을 큐 맨 뒤로 재삽입
     const [cur] = quiz.queue.splice(0, 1);
     quiz.queue.push(cur);
-    $("#next-btn").classList.remove("hidden");
   }
+  // 정답/오답 모두 "다음" 버튼을 눌러야 넘어간다(자동 진행 없음).
+  $("#next-btn").classList.remove("hidden");
 }
 
 /** 큐가 비었으면 종료 화면, 아니면 다음 문항으로 진행한다. */
@@ -319,18 +488,47 @@ function finishQuiz(empty) {
   const done = $("#quiz-done");
   done.classList.remove("hidden");
   $("#quiz-progress-bar").style.width = "100%";
-  $("#quiz-done-msg").textContent = empty
-    ? "복습할 항목이 없어요. 데이터를 먼저 주입해 주세요!"
-    : `${quiz.uniqueTotal}개 항목을 모두 풀었어요. 틀린 항목은 다음 복습에 우선 출제됩니다.`;
+  const label = MODE_LABEL[quiz.mode] || quiz.mode;
+  $("#quiz-done-title").textContent = `${label} 완료!`;
+  if (empty) {
+    const emptyMsg = {
+      new: "새로 배울 항목이 없어요. 데이터를 먼저 주입해 주세요!",
+      due: "지금 복습할 항목이 없어요. 학습완 항목은 며칠 뒤 다시 나타나요.",
+      mastered: "아직 완전학습완 항목이 없어요. 복습으로 3번 연속 맞혀보세요!",
+    };
+    $("#quiz-done-msg").textContent = emptyMsg[quiz.mode] || "풀 항목이 없어요.";
+    return;
+  }
+  const missed = quiz.everWrong.size;
+  // 마스터는 이 세션만으로 안 오른다: 항목당 3번의 별도 세션에서 연속으로
+  // 첫 시도 정답을 내야 달성된다. 그래서 그 진행 상황을 여기서 짚어준다.
+  $("#quiz-done-msg").textContent =
+    `${quiz.uniqueTotal}개 항목 완료 — 첫 시도 정답 ${quiz.firstTryCorrect}개` +
+    (missed ? `, 실수 후 통과 ${missed}개` : "") +
+    `. 정답을 맞히면 3일간 쉬었다가 다시 나오고, 3번 연속 통과하면 완전학습완이에요.`;
 }
 
-$("#start-quiz-btn").addEventListener("click", startQuiz);
+$$(".mode-btn").forEach((b) => b.addEventListener("click", () => startQuiz(b.dataset.mode)));
 $("#back-dash-btn").addEventListener("click", () => showView("dashboard"));
 $("#tts-btn").addEventListener("click", () => {
-  const item = quiz.queue[0];
+  // quiz.queue[0]이 아니라 quiz.currentItem을 써야 한다: 정답을 맞히면
+  // selectOption()이 즉시 큐를 앞으로 밀어버려서(shift), "다음" 버튼을 누르기
+  // 전까지는 queue[0]이 이미 다음 문제를 가리킨다 — 그 상태에서 🔊를 누르면
+  // 지금 화면에 있는 문제가 아니라 다음 문제 발음이 나오는 버그가 있었다.
+  const item = quiz.currentItem;
   if (!item) return;
-  if (item.type === "vocabulary") speak(item.word);
-  else speakSentence(item.sentence, "，");
+  if (item.type === "vocabulary") {
+    speak(item.word);
+  } else if (item.pronunciation) {
+    // 발음 매칭 형식: 화면에 이미 정답 한자가 보이므로 자유롭게 들려준다.
+    speakSentence(item.sentence, item.correct_option);
+  } else if (quiz.locked) {
+    // 구식 빈칸-한자 폴백, 채점 후: 정답을 채워서 들려준다.
+    speakSentence(item.sentence, item.correct_option);
+  } else {
+    // 구식 빈칸-한자 폴백, 채점 전: 빈칸은 짧은 쉼으로(정답 노출 방지).
+    speakSentence(item.sentence, "，");
+  }
 });
 
 // --------------------------------------------------------------------------- //
