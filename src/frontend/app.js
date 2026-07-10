@@ -51,19 +51,31 @@ function refreshVoices() {
   if ("speechSynthesis" in window) VOICES = window.speechSynthesis.getVoices() || [];
 }
 
+/** 광둥어(월어) 로케일인지 판별한다: zh-HK / zh-MO / yue-*. */
+function isCantonese(lang) {
+  const l = (lang || "").toLowerCase();
+  return l === "zh-hk" || l === "zh-mo" || l.startsWith("yue");
+}
+
 /**
  * TTS_LANG에 맞는 음성을 고른다.
- * 정확히 일치하는 로케일(zh-CN 등)을 우선하고, 없으면 같은 언어(zh)로 폴백한다.
- * 이렇게 안 하면 만다린(zh-CN) 텍스트를 광둥어(zh-HK) 음성으로 읽어버릴 수 있다.
+ * 1) 정확히 일치하는 로케일(zh-CN 등)을 최우선.
+ * 2) 같은 언어(zh) 폴백. 단 만다린을 원할 땐 광둥어(zh-HK) 음성은 건너뛴다 —
+ *    zh-CN 음성이 없는 환경에서 zh-HK가 잡혀 만다린 글자를 광둥어로 읽어버리는
+ *    걸 막기 위함(정말 zh 음성이 광둥어뿐이면 마지막에 그거라도 쓴다).
  * @returns {SpeechSynthesisVoice|undefined}
  */
 function pickVoice() {
   const want = TTS_LANG.toLowerCase();
   const base = want.split("-")[0];
-  return (
-    VOICES.find((v) => v.lang && v.lang.toLowerCase() === want) ||
-    VOICES.find((v) => v.lang && v.lang.toLowerCase().startsWith(base))
-  );
+  const exact = VOICES.find((v) => v.lang && v.lang.toLowerCase() === want);
+  if (exact) return exact;
+  const sameLang = VOICES.filter((v) => v.lang && v.lang.toLowerCase().startsWith(base));
+  if (!isCantonese(want)) {
+    const mandarin = sameLang.find((v) => !isCantonese(v.lang));
+    if (mandarin) return mandarin;
+  }
+  return sameLang[0];
 }
 
 /**
