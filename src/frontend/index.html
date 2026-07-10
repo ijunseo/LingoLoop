@@ -115,6 +115,54 @@
       </div>
     </section>
 
+    <!-- ============================ QUIZ CONFIG ============================ -->
+    <section id="view-config" class="hidden">
+      <div class="rounded-2xl border border-white/5 bg-ink-800 p-6 space-y-7">
+        <div>
+          <h2 id="config-title" class="text-lg font-bold">복습</h2>
+          <p class="text-xs text-slate-400">
+            공부할 기간과 문항 수를 고르세요. 고른 범위에서 <b>무작위로</b> 출제됩니다.
+          </p>
+        </div>
+
+        <!-- 기간 슬라이더 (데이터 유입일 기준, 양끝 핸들) -->
+        <div>
+          <div class="mb-2 flex items-center justify-between text-sm">
+            <span class="text-slate-400">기간 (데이터 들어온 날)</span>
+            <span class="font-mono text-brand-400">
+              <span id="config-start-label">–</span> ~ <span id="config-end-label">–</span>
+            </span>
+          </div>
+          <div class="dual-range">
+            <div class="dual-range-track"><div id="dual-range-fill"></div></div>
+            <input type="range" id="range-start" min="0" max="0" value="0" aria-label="시작 날짜" />
+            <input type="range" id="range-end" min="0" max="0" value="0" aria-label="종료 날짜" />
+          </div>
+        </div>
+
+        <!-- 구간 개수 + 문항 수 입력 -->
+        <div class="flex items-end justify-between gap-4">
+          <p class="text-sm text-slate-300">이 기간 안에 <b id="config-in-range" class="text-white">0</b>개</p>
+          <label class="flex items-center gap-2 text-sm text-slate-300">
+            몇 개 풀기?
+            <input type="number" id="config-limit" min="1" value="15"
+              class="w-20 rounded-lg border border-white/10 bg-ink-900 px-3 py-1.5 text-right font-mono text-slate-100 outline-none focus:border-brand-500" />
+          </label>
+        </div>
+
+        <div class="flex gap-3">
+          <button id="config-start-btn"
+            class="flex-1 rounded-xl bg-brand-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-brand-500 active:scale-95">
+            시작 →
+          </button>
+          <button id="config-cancel-btn"
+            class="rounded-xl border border-white/10 px-5 py-3 text-sm text-slate-300 transition hover:bg-white/5">
+            취소
+          </button>
+        </div>
+      </div>
+    </section>
+
     <!-- =============================== QUIZ =============================== -->
     <section id="view-quiz" class="hidden">
       <!-- Progress -->

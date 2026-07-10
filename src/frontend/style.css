@@ -163,6 +163,70 @@
   line-height: 1;
 }
 
+/* 기간 선택용 양끝 핸들(dual-range) 슬라이더.
+   투명한 range input 두 개를 겹쳐 놓고, 트랙은 pointer-events를 끄고
+   썸(thumb)에만 되살려 두 핸들을 각각 잡을 수 있게 한다. */
+.dual-range {
+  position: relative;
+  height: 36px;
+}
+.dual-range-track {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  height: 6px;
+  border-radius: 3px;
+  background: #1a2233;
+  z-index: 1;
+}
+#dual-range-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #7c3aed, #a78bfa);
+}
+.dual-range input[type="range"] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 36px;
+  margin: 0;
+  background: none;
+  pointer-events: none; /* 트랙 클릭 무시 — 썸만 잡힘 */
+  -webkit-appearance: none;
+  appearance: none;
+  z-index: 2;
+}
+.dual-range input[type="range"]:disabled { opacity: 0.6; }
+.dual-range input[type="range"]::-webkit-slider-runnable-track { background: none; }
+.dual-range input[type="range"]::-moz-range-track { background: none; }
+.dual-range input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid #8b5cf6;
+  cursor: grab;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+.dual-range input[type="range"]::-webkit-slider-thumb:active { cursor: grabbing; }
+.dual-range input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid #8b5cf6;
+  cursor: grab;
+}
+
 /* 데이터 포맷 확정 전까지 반복 테스트용 DB 리셋 — 눈에 안 띄게 구석에 */
 .corner-reset {
   position: fixed;

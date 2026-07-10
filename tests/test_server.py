@@ -160,6 +160,42 @@ def test_quiz_sorted_by_weight(client: TestClient) -> None:
     assert order.index("v-high") < order.index("v-low")
 
 
+def test_quiz_meta_reports_dates_and_counts(client: TestClient) -> None:
+    """/api/quiz-meta는 모드별 유입 날짜(YYYY-MM-DD)와 날짜별 개수를 준다."""
+    items = [
+        vocab("v1", "我", "나", created_at="2026-07-01T00:00:00Z"),
+        vocab("v2", "你", "너", created_at="2026-07-01T09:00:00Z"),
+        vocab("v3", "他", "그", created_at="2026-07-03T00:00:00Z"),
+    ]
+    import_payload(client, json.dumps(items, ensure_ascii=False))
+    meta = client.get("/api/quiz-meta?mode=new").json()
+    assert meta["dates"] == ["2026-07-01", "2026-07-03"]
+    assert meta["counts"] == {"2026-07-01": 2, "2026-07-03": 1}
+    assert meta["total"] == 3
+
+
+def test_quiz_date_range_filters(client: TestClient) -> None:
+    """start/end로 유입 날짜 구간을 필터링한다(양끝 포함)."""
+    items = [
+        vocab("v1", "我", "나", created_at="2026-07-01T00:00:00Z"),
+        vocab("v3", "他", "그", created_at="2026-07-03T00:00:00Z"),
+    ]
+    import_payload(client, json.dumps(items, ensure_ascii=False))
+    later = {it["id"] for it in client.get("/api/quiz?mode=new&start=2026-07-02").json()["items"]}
+    assert later == {"v3"}
+    earlier = {it["id"] for it in client.get("/api/quiz?mode=new&end=2026-07-02").json()["items"]}
+    assert earlier == {"v1"}
+
+
+def test_quiz_limit_caps_count(client: TestClient) -> None:
+    """limit으로 무작위 샘플링 개수를 지정한다(0<limit 검증은 FastAPI Query)."""
+    items = [vocab(f"v{i}", "我", "나") for i in range(20)]
+    import_payload(client, json.dumps(items, ensure_ascii=False))
+    assert client.get("/api/quiz?mode=new&limit=5").json()["count"] == 5
+    assert client.get("/api/quiz?mode=new&limit=100").json()["count"] == 20  # 있는 만큼만
+    assert client.get("/api/quiz?mode=new&limit=0").status_code == 422  # ge=1
+
+
 def test_review_lifecycle(client: TestClient) -> None:
     """정답 3연속 → 마스터, 이후 오답 → 리셋 + wrong_count 증가."""
     import_payload(client, json.dumps([vocab("v-x", "来", "오다")], ensure_ascii=False))

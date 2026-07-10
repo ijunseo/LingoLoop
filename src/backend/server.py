@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Iterable, Iterator, Literal
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -381,7 +381,12 @@ def _recency_scores(rows: list[sqlite3.Row]) -> dict[str, int]:
 
 
 @app.get("/api/quiz")
-def api_quiz(mode: Status = "due") -> dict[str, Any]:
+def api_quiz(
+    mode: Status = "due",
+    start: str | None = None,
+    end: str | None = None,
+    limit: int = Query(default=QUIZ_SIZE, ge=1, le=1000),
+) -> dict[str, Any]:
     """복습 문항을 반환한다.
 
     mode로 어떤 학습 상태의 항목을 출제할지 고른다(compute_status 참고):
@@ -390,18 +395,29 @@ def api_quiz(mode: Status = "due") -> dict[str, Any]:
       - "fresh": 학습완 — 쉬는 중인 항목을 '재확인'용으로 출제. 프론트엔드는
         이 모드의 결과를 /api/review로 기록하지 않아 잠자는 상태를 안 건드린다.
       - "mastered": 완전학습완 — 이미 마스터된 항목을 선택적으로 다시 연습.
-    `wrong_count * 10 + 최신성(0~100)` 점수 내림차순으로 상위 QUIZ_SIZE개를 준다.
-    정답 채점은 프론트에서 하므로 correct_option도 함께 내려준다.
+
+    start/end: created_at 날짜(YYYY-MM-DD) 하한/상한(둘 다 포함). 데이터가 들어온
+      날짜 구간으로 필터링한다(프론트의 기간 슬라이더).
+    limit: 최종 출제 수. 필터된 집합에서 무작위로 이만큼 샘플링한다 — 항상 같은
+      상위 항목만 나오지 않고 매번 다른 조합이 나오게 하기 위함.
+    고른 문항 안에서는 `wrong_count * 10 + 최신성(0~100)` 점수로 약점 우선 정렬한다.
     """
     with get_db() as conn:
         all_vocab = conn.execute("SELECT * FROM vocabulary").fetchall()
         all_gram = conn.execute("SELECT * FROM grammar").fetchall()
 
-    def in_mode(row: sqlite3.Row) -> bool:
-        return compute_status(row["consecutive_correct"], row["last_reviewed_at"]) == mode
+    def in_scope(row: sqlite3.Row) -> bool:
+        if compute_status(row["consecutive_correct"], row["last_reviewed_at"]) != mode:
+            return False
+        day = (row["created_at"] or "")[:10]  # ISO의 날짜 부분
+        if start and day < start:
+            return False
+        if end and day > end:
+            return False
+        return True
 
-    vocab = [r for r in all_vocab if in_mode(r)]
-    gram = [r for r in all_gram if in_mode(r)]
+    vocab = [r for r in all_vocab if in_scope(r)]
+    gram = [r for r in all_gram if in_scope(r)]
 
     recency = _recency_scores(list(vocab) + list(gram))
 
@@ -431,14 +447,45 @@ def api_quiz(mode: Status = "due") -> dict[str, Any]:
         return base
 
     items = [render(r, "vocabulary") for r in vocab] + [render(r, "grammar") for r in gram]
-    # 점수가 같은 항목들이 매번 같은 순서로 나오지 않도록 먼저 섞은 뒤,
-    # 안정 정렬로 점수 내림차순 정렬한다(동점은 무작위 → 단어/문법이 골고루).
+    # 무작위 샘플링: 필터된 집합에서 limit개를 랜덤으로 골라 매번 다른 조합을 낸다.
+    if limit < len(items):
+        items = random.sample(items, limit)
+    # 고른 문항 안에서는 약점(가중치) 우선 + 동점 무작위로 정렬한다.
     random.shuffle(items)
     items.sort(key=lambda x: x["_score"], reverse=True)
-    items = items[:QUIZ_SIZE]
     for it in items:
         it.pop("_score", None)
     return {"count": len(items), "items": items}
+
+
+@app.get("/api/quiz-meta")
+def api_quiz_meta(mode: Status = "due") -> dict[str, Any]:
+    """해당 모드 항목들이 '언제 들어왔는지'(created_at 날짜)와 날짜별 개수를 준다.
+
+    프론트엔드가 기간 슬라이더(양끝 핸들)의 눈금을 만들고, 선택한 구간 안의
+    항목 수를 실시간으로 계산하는 데 쓴다.
+
+    Returns:
+        {"mode", "dates": [정렬된 YYYY-MM-DD…], "counts": {날짜: n}, "total": n}
+    """
+    with get_db() as conn:
+        rows = list(conn.execute(
+            "SELECT consecutive_correct, last_reviewed_at, created_at FROM vocabulary"
+        )) + list(conn.execute(
+            "SELECT consecutive_correct, last_reviewed_at, created_at FROM grammar"
+        ))
+    counts: dict[str, int] = {}
+    for r in rows:
+        if compute_status(r["consecutive_correct"], r["last_reviewed_at"]) != mode:
+            continue
+        day = (r["created_at"] or "")[:10]
+        counts[day] = counts.get(day, 0) + 1
+    return {
+        "mode": mode,
+        "dates": sorted(counts),
+        "counts": counts,
+        "total": sum(counts.values()),
+    }
 
 
 @app.put("/api/review")

@@ -15,20 +15,21 @@ const $$ = (sel) => document.querySelectorAll(sel);
 // 화면 전환 (Navigation)
 // --------------------------------------------------------------------------- //
 /**
- * 대시보드/퀴즈 뷰를 전환하고 탭 활성 상태를 갱신한다.
- * @param {"dashboard"|"quiz"} name - 표시할 뷰 이름.
+ * 대시보드/설정/퀴즈 뷰를 전환하고 탭 활성 상태를 갱신한다.
+ * @param {"dashboard"|"config"|"quiz"} name - 표시할 뷰 이름.
  */
 function showView(name) {
   $("#view-dashboard").classList.toggle("hidden", name !== "dashboard");
+  $("#view-config").classList.toggle("hidden", name !== "config");
   $("#view-quiz").classList.toggle("hidden", name !== "quiz");
   $$(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   if (name === "dashboard") loadStats();
 }
-// 헤더 "복습" 탭은 바로 due(복습) 세션을 시작한다.
+// 헤더 "복습" 탭은 due(복습) 모드의 설정 패널을 연다.
 // (예전엔 showView("quiz")만 호출해 퀴즈가 시작되지 않은 빈 화면이 떴다 — 버그.)
 $$(".tab-btn").forEach((b) =>
   b.addEventListener("click", () => {
-    if (b.dataset.tab === "quiz") startQuiz("due");
+    if (b.dataset.tab === "quiz") openConfig("due");
     else showView("dashboard");
   }),
 );
@@ -235,6 +236,105 @@ $("#reset-db-btn").addEventListener("click", async () => {
 });
 
 // --------------------------------------------------------------------------- //
+// 퀴즈 설정 패널 (기간 슬라이더 + 문항 수)
+// --------------------------------------------------------------------------- //
+const rangeStart = $("#range-start");
+const rangeEnd = $("#range-end");
+let configMode = "due";
+let configDates = [];   // 정렬된 날짜 문자열(슬라이더 눈금)
+let configCounts = {};  // 날짜 → 항목 수
+
+function fmtDate(d) {
+  return d || "(날짜없음)";
+}
+
+/**
+ * 모드 버튼을 누르면 바로 시작하지 않고 기간·개수 설정 패널을 연다.
+ * 해당 모드에 항목이 없거나 메타 로딩이 실패하면 곧장 startQuiz로 넘긴다.
+ * @param {"new"|"due"|"fresh"|"mastered"} mode
+ * @returns {Promise<void>}
+ */
+async function openConfig(mode) {
+  configMode = mode;
+  let meta;
+  try {
+    const r = await fetch(`/api/quiz-meta?mode=${encodeURIComponent(mode)}`);
+    meta = await r.json();
+  } catch (e) {
+    console.error(e);
+    startQuiz(mode, {}); // 메타 실패 → 기본 방식으로 바로 시작
+    return;
+  }
+  if (!meta.total) {
+    startQuiz(mode, {}); // 항목 없음 → 빈 화면 안내
+    return;
+  }
+
+  configDates = meta.dates;
+  configCounts = meta.counts;
+  $("#config-title").textContent = MODE_LABEL[mode] || mode;
+
+  const maxIdx = Math.max(0, configDates.length - 1);
+  const single = configDates.length <= 1;
+  rangeStart.min = rangeEnd.min = "0";
+  rangeStart.max = rangeEnd.max = String(maxIdx);
+  rangeStart.value = "0";
+  rangeEnd.value = String(maxIdx);
+  rangeStart.disabled = rangeEnd.disabled = single; // 날짜가 하루뿐이면 슬라이더 고정
+  updateRange();
+  $("#config-limit").value = String(Math.min(meta.total, 15)); // 기본 15개
+  showView("config");
+}
+
+/** 슬라이더 상태에 맞춰 라벨·채움바·구간 개수·개수입력 최대값을 갱신한다. */
+function updateRange() {
+  const s = +rangeStart.value;
+  const e = +rangeEnd.value;
+  const denom = Math.max(1, configDates.length - 1);
+  $("#config-start-label").textContent = fmtDate(configDates[s]);
+  $("#config-end-label").textContent = fmtDate(configDates[e]);
+
+  // 채움 바(선택 구간 시각화)
+  const left = configDates.length <= 1 ? 0 : (s / denom) * 100;
+  const width = configDates.length <= 1 ? 100 : ((e - s) / denom) * 100;
+  $("#dual-range-fill").style.left = left + "%";
+  $("#dual-range-fill").style.width = width + "%";
+
+  // 구간 내 항목 수
+  let count = 0;
+  for (let i = s; i <= e; i++) count += configCounts[configDates[i]] || 0;
+  $("#config-in-range").textContent = count;
+
+  // 문항 수 입력 상한 클램프
+  const limitEl = $("#config-limit");
+  limitEl.max = String(count);
+  if (+limitEl.value > count) limitEl.value = String(count);
+  if (+limitEl.value < 1) limitEl.value = String(Math.min(1, count));
+}
+
+rangeStart.addEventListener("input", () => {
+  if (+rangeStart.value > +rangeEnd.value) rangeStart.value = rangeEnd.value; // 교차 방지
+  updateRange();
+});
+rangeEnd.addEventListener("input", () => {
+  if (+rangeEnd.value < +rangeStart.value) rangeEnd.value = rangeStart.value;
+  updateRange();
+});
+$("#config-limit").addEventListener("input", () => {
+  const el = $("#config-limit");
+  const max = +el.max || 0;
+  if (+el.value > max) el.value = String(max);
+});
+$("#config-start-btn").addEventListener("click", () => {
+  const s = +rangeStart.value;
+  const e = +rangeEnd.value;
+  let limit = parseInt($("#config-limit").value, 10);
+  if (!Number.isFinite(limit) || limit < 1) limit = 1;
+  startQuiz(configMode, { start: configDates[s], end: configDates[e], limit });
+});
+$("#config-cancel-btn").addEventListener("click", () => showView("dashboard"));
+
+// --------------------------------------------------------------------------- //
 // 퀴즈 엔진 (Quiz engine)
 // --------------------------------------------------------------------------- //
 /** 학습 모드별 한글 라벨(대시보드 버튼·퀴즈 배지·완료 메시지에서 공용으로 사용). */
@@ -317,10 +417,11 @@ function normalizeItem(item) {
 
 /**
  * 퀴즈 데이터를 받아 세션을 초기화하고 첫 문항을 그린다.
- * @param {"new"|"due"|"mastered"} mode - 어떤 학습 상태의 항목을 출제할지.
+ * @param {"new"|"due"|"fresh"|"mastered"} mode - 어떤 학습 상태의 항목을 출제할지.
+ * @param {{start?: string, end?: string, limit?: number}} [opts] - 기간·문항 수.
  * @returns {Promise<void>}
  */
-async function startQuiz(mode) {
+async function startQuiz(mode, opts = {}) {
   quiz.mode = mode;
   showView("quiz");
   $("#quiz-mode-badge").textContent =
@@ -329,7 +430,11 @@ async function startQuiz(mode) {
   $("#quiz-card").classList.remove("hidden");
   let data;
   try {
-    const r = await fetch(`/api/quiz?mode=${encodeURIComponent(mode)}`);
+    const params = new URLSearchParams({ mode });
+    if (opts.start) params.set("start", opts.start);
+    if (opts.end) params.set("end", opts.end);
+    if (opts.limit) params.set("limit", String(opts.limit));
+    const r = await fetch(`/api/quiz?${params.toString()}`);
     data = await r.json();
     if (!r.ok || !Array.isArray(data.items)) throw new Error(data.detail || "bad response");
   } catch (e) {
@@ -566,7 +671,7 @@ function finishQuiz(empty) {
     (missed ? `, 실수 후 통과 ${missed}개` : "") + tail;
 }
 
-$$(".mode-btn").forEach((b) => b.addEventListener("click", () => startQuiz(b.dataset.mode)));
+$$(".mode-btn").forEach((b) => b.addEventListener("click", () => openConfig(b.dataset.mode)));
 $("#back-dash-btn").addEventListener("click", () => showView("dashboard"));
 $("#tts-btn").addEventListener("click", () => {
   // quiz.queue[0]이 아니라 quiz.currentItem을 써야 한다: 정답을 맞히면
