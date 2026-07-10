@@ -101,6 +101,15 @@ without any explanations, greetings, or markdown formatting.
 
 ---
 
+## 🧪 테스트
+
+```bash
+uv run pytest            # 백엔드 API (중국어 데이터로 import·quiz·review 검증)
+node --test tests/       # TTS 텍스트 정규화(cleanSentenceForTTS) 검증
+```
+
+---
+
 ## 📁 폴더 구조
 
 ```
@@ -112,6 +121,7 @@ LingoLoop/
 │   └── scripts/
 │       ├── generate_profile.py    # DB → learning_profile.md
 │       └── seed_dummy.py          # 데모 데이터
+├── tests/                         # pytest(test_server.py) · node:test(tts.test.js)
 ├── .claude/skills/generate-profile/SKILL.md   # Claude Code 스킬
 ├── learning_profile.md            # 생성되는 리포트 (gitignore)
 ├── pyproject.toml

@@ -12,6 +12,16 @@ dependencies = [
 [tool.uv]
 package = false
 
+[dependency-groups]
+# 개발/테스트 전용 의존성. `uv run` / `uv sync` 시 기본 포함되는 그룹.
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",   # fastapi.testclient가 사용
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.lingoloop]
 # Mastery threshold: an item is "mastered" (and filtered out of quizzes)
 # once consecutive_correct reaches this value.
