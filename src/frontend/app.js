@@ -24,14 +24,23 @@ function showView(name) {
   $$(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   if (name === "dashboard") loadStats();
 }
-$$(".tab-btn").forEach((b) => b.addEventListener("click", () => showView(b.dataset.tab)));
+// 헤더 "복습" 탭은 바로 due(복습) 세션을 시작한다.
+// (예전엔 showView("quiz")만 호출해 퀴즈가 시작되지 않은 빈 화면이 떴다 — 버그.)
+$$(".tab-btn").forEach((b) =>
+  b.addEventListener("click", () => {
+    if (b.dataset.tab === "quiz") startQuiz("due");
+    else showView("dashboard");
+  }),
+);
 
 // --------------------------------------------------------------------------- //
 // 발음 재생 (Text-to-speech)
 // --------------------------------------------------------------------------- //
-// 학습 언어. 다른 언어로 바꾸려면 이 한 줄만 수정한다("en-US", "ja-JP" 등).
+// 학습 언어 설정. 광둥어(광저우)로 바꾸려면 TTS_LANG를 "zh-HK"로 바꾸고,
+// 데이터는 병음 대신 Jyutping(월병) 발음으로 임포트한다(README "언어 바꾸기" 참고).
 // 해당 언어의 OS 음성이 설치돼 있어야 소리가 난다.
-const TTS_LANG = "zh-CN"; // 중국어(만다린) 학습용
+const TTS_LANG = "zh-CN";          // 만다린. 광둥어(광저우)는 "zh-HK"
+const STUDY_LANG_LABEL = "중국어";  // 안내 배너에 쓰는 언어 이름
 
 /** @type {SpeechSynthesisVoice[]} 캐시된 음성 목록. */
 let VOICES = [];
@@ -41,10 +50,19 @@ function refreshVoices() {
   if ("speechSynthesis" in window) VOICES = window.speechSynthesis.getVoices() || [];
 }
 
-/** @returns {SpeechSynthesisVoice|undefined} TTS_LANG에 맞는 음성. */
+/**
+ * TTS_LANG에 맞는 음성을 고른다.
+ * 정확히 일치하는 로케일(zh-CN 등)을 우선하고, 없으면 같은 언어(zh)로 폴백한다.
+ * 이렇게 안 하면 만다린(zh-CN) 텍스트를 광둥어(zh-HK) 음성으로 읽어버릴 수 있다.
+ * @returns {SpeechSynthesisVoice|undefined}
+ */
 function pickVoice() {
-  const base = TTS_LANG.split("-")[0].toLowerCase();
-  return VOICES.find((v) => v.lang && v.lang.toLowerCase().startsWith(base));
+  const want = TTS_LANG.toLowerCase();
+  const base = want.split("-")[0];
+  return (
+    VOICES.find((v) => v.lang && v.lang.toLowerCase() === want) ||
+    VOICES.find((v) => v.lang && v.lang.toLowerCase().startsWith(base))
+  );
 }
 
 /**
@@ -85,9 +103,9 @@ function checkTTSHealth() {
   const bar = document.createElement("div");
   bar.className = "tts-warning";
   bar.innerHTML =
-    "⚠️ 이 환경에서 중국어 음성을 찾지 못했어요. VS Code 미리보기가 아니라 " +
+    `⚠️ 이 환경에서 ${STUDY_LANG_LABEL} 음성을 찾지 못했어요. VS Code 미리보기가 아니라 ` +
     "<b>Chrome / Edge</b>에서 <b>http://127.0.0.1:8000</b> 을 여세요. " +
-    "(Edge는 중국어 음성 내장) ";
+    `(Edge는 ${STUDY_LANG_LABEL} 음성 내장) `;
   const close = document.createElement("button");
   close.textContent = "✕";
   close.setAttribute("aria-label", "닫기");
@@ -204,10 +222,11 @@ $("#reset-db-btn").addEventListener("click", async () => {
   try {
     const r = await fetch("/api/reset", { method: "POST" });
     if (!r.ok) throw new Error("reset failed");
-    quiz.queue = []; // 진행 중이던 퀴즈가 참조하던 항목도 함께 무효화
+    quiz.queue = [];
+    quiz.currentItem = null;
     btn.textContent = "✅ 초기화됨";
     setTimeout(() => { btn.textContent = "🗑 DB 리셋"; }, 1500);
-    if (!$("#view-dashboard").classList.contains("hidden")) loadStats();
+    showView("dashboard"); // 진행 중이던 퀴즈에서 빠져나오고 stats도 갱신한다
   } catch (e) {
     console.error(e);
     btn.textContent = "❌ 실패";
@@ -264,9 +283,18 @@ function shuffle(arr) {
  * @param {string[]} pool - 오답 후보 발음 풀.
  * @returns {string[]} 섞인 발음 보기(최대 4개).
  */
-function pronOptions(correct, pool) {
-  const distractors = pool.filter((p) => p && p !== correct);
-  return shuffle([correct, ...shuffle(distractors).slice(0, 3)]);
+function pronOptions(correct, pool, fallbackPool = []) {
+  // 같은 종류(단어/문법) 풀에서 오답을 우선 뽑되, 항목이 적어 3개가 안 되면
+  // 다른 종류 풀에서 빌려와 최대한 4지선다를 채운다(1지선다 방지).
+  const same = shuffle(pool.filter((p) => p && p !== correct));
+  let distractors = same.slice(0, 3);
+  if (distractors.length < 3) {
+    const extra = shuffle(
+      fallbackPool.filter((p) => p && p !== correct && !distractors.includes(p)),
+    );
+    distractors = distractors.concat(extra).slice(0, 3);
+  }
+  return shuffle([correct, ...distractors]);
 }
 
 /**
@@ -293,8 +321,21 @@ async function startQuiz(mode) {
   $("#quiz-mode-badge").textContent = MODE_LABEL[mode] || mode;
   $("#quiz-done").classList.add("hidden");
   $("#quiz-card").classList.remove("hidden");
-  const r = await fetch(`/api/quiz?mode=${encodeURIComponent(mode)}`);
-  const data = await r.json();
+  let data;
+  try {
+    const r = await fetch(`/api/quiz?mode=${encodeURIComponent(mode)}`);
+    data = await r.json();
+    if (!r.ok || !Array.isArray(data.items)) throw new Error(data.detail || "bad response");
+  } catch (e) {
+    // 서버가 꺼져 있거나 응답이 이상하면 크래시 대신 안내 화면을 보여준다.
+    console.error(e);
+    $("#quiz-card").classList.add("hidden");
+    $("#quiz-done").classList.remove("hidden");
+    $("#quiz-done-title").textContent = "불러오기 실패";
+    $("#quiz-done-msg").textContent =
+      "서버에 연결할 수 없어요. 백엔드가 실행 중인지 확인하세요 (uv run uvicorn src.backend.server:app).";
+    return;
+  }
   quiz.queue = data.items.map(normalizeItem);
   quiz.uniqueTotal = quiz.queue.length;
   quiz.solved = 0;
@@ -350,7 +391,7 @@ function renderCurrent() {
       <div class="mt-3 text-lg text-slate-400">${escapeHtml(item.meaning || "")}</div>
     `;
     quiz.currentCorrect = item.pronunciation;
-    options = pronOptions(item.pronunciation, quiz.pronPool);
+    options = pronOptions(item.pronunciation, quiz.pronPool, quiz.grammarPronPool);
     isPron = true;
   } else if (item.type === "vocabulary") {
     // 발음 데이터가 없으면 기존 방식(뜻 고르기)으로 폴백.
@@ -376,7 +417,7 @@ function renderCurrent() {
         : ""}
     `;
     quiz.currentCorrect = item.pronunciation;
-    options = pronOptions(item.pronunciation, quiz.grammarPronPool);
+    options = pronOptions(item.pronunciation, quiz.grammarPronPool, quiz.pronPool);
     isPron = true;
   } else {
     // 발음 데이터가 없으면 기존 방식(빈칸에 맞는 한자 고르기)으로 폴백.
@@ -419,6 +460,9 @@ async function selectOption(btn, opt, item) {
   quiz.locked = true;
   const correct = quiz.currentCorrect;
   const isCorrect = opt === correct;
+  // everWrong 키는 type+id로 잡는다: 단어와 문법이 같은 id를 쓸 수 있어(LLM이
+  // UUID를 재사용하는 경우) id만 쓰면 서로의 1세션-1카운트 판정을 오염시킨다.
+  const key = item.type + ":" + item.id;
 
   // 정답 공개
   $$("#quiz-options .option-btn").forEach((b) => {
@@ -432,7 +476,7 @@ async function selectOption(btn, opt, item) {
   else speakSentence(item.sentence, item.correct_option);
 
   if (isCorrect) {
-    if (!quiz.everWrong.has(item.id)) {
+    if (!quiz.everWrong.has(key)) {
       // 첫 시도 정답 → 마스터 카운트 반영
       sendReview(item, true);
       quiz.firstTryCorrect += 1;
@@ -440,10 +484,10 @@ async function selectOption(btn, opt, item) {
     quiz.solved += 1;
     quiz.queue.shift(); // 푼 항목 제거
   } else {
-    if (!quiz.everWrong.has(item.id)) {
+    if (!quiz.everWrong.has(key)) {
       // 1세션 1카운트: 최초 오답 1회만 DB에 반영
       sendReview(item, false);
-      quiz.everWrong.add(item.id);
+      quiz.everWrong.add(key);
     }
     // 이 항목을 큐 맨 뒤로 재삽입
     const [cur] = quiz.queue.splice(0, 1);
@@ -500,12 +544,14 @@ function finishQuiz(empty) {
     return;
   }
   const missed = quiz.everWrong.size;
-  // 마스터는 이 세션만으로 안 오른다: 항목당 3번의 별도 세션에서 연속으로
-  // 첫 시도 정답을 내야 달성된다. 그래서 그 진행 상황을 여기서 짚어준다.
+  // 마스터는 이 세션만으로 안 오른다: 항목당 별도 세션 3번에 걸쳐 연속으로
+  // 첫 시도 정답을 내야 달성된다. 모드에 따라 안내 문구를 달리한다.
+  const tail = quiz.mode === "mastered"
+    ? ". 틀린 항목은 학습필요로 되돌아가 다시 확인하게 돼요."
+    : ". 정답을 맞히면 3일간 쉬었다가 다시 나오고, 3번 연속 통과하면 완전학습완이에요.";
   $("#quiz-done-msg").textContent =
     `${quiz.uniqueTotal}개 항목 완료 — 첫 시도 정답 ${quiz.firstTryCorrect}개` +
-    (missed ? `, 실수 후 통과 ${missed}개` : "") +
-    `. 정답을 맞히면 3일간 쉬었다가 다시 나오고, 3번 연속 통과하면 완전학습완이에요.`;
+    (missed ? `, 실수 후 통과 ${missed}개` : "") + tail;
 }
 
 $$(".mode-btn").forEach((b) => b.addEventListener("click", () => startQuiz(b.dataset.mode)));

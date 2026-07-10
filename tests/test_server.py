@@ -226,6 +226,25 @@ def test_grammar_pronunciation_round_trips(client: TestClient) -> None:
     assert item["correct_option"] == "是"  # 빈칸에 채울 한자는 그대로 유지
 
 
+def test_seed_dummy_imports_cleanly(client: TestClient) -> None:
+    """seed_dummy의 더미 데이터가 현재 스키마에 맞게 임포트된다(회귀 방지).
+
+    단어는 병음, 문법은 병음+target_meaning을 갖춘 중국어 데이터여야 하며,
+    건너뛰는(skipped) 항목이 없어야 한다.
+    """
+    sys.path.insert(0, str(ROOT / "src" / "scripts"))
+    import seed_dummy  # noqa: E402
+
+    items = seed_dummy.build_items()
+    counts = import_payload(client, json.dumps(items, ensure_ascii=False))
+    assert counts["skipped"] == 0
+    assert counts["vocabulary"] + counts["grammar"] == len(items)
+
+    quiz = client.get("/api/quiz?mode=new").json()["items"]
+    gram = [it for it in quiz if it["type"] == "grammar"]
+    assert gram and all(it.get("pronunciation") for it in gram)  # 문법에 병음 존재
+
+
 def test_reset_clears_all_data(client: TestClient) -> None:
     """/api/reset은 vocabulary·grammar를 모두 비운다."""
     items = [

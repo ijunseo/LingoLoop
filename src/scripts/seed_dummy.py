@@ -31,64 +31,57 @@ def days_ago(n: int) -> str:
     return (datetime.now(timezone.utc) - timedelta(days=n)).isoformat()
 
 
-# (word, ipa, meaning, distractors, wrong_count, streak, days_ago)
+# 단어: (한자, 표준 병음, 뜻, 오답 뜻들, wrong_count, streak, days_ago)
 VOCAB = [
-    ("serendipity", "/ˌserənˈdɪpəti/", "뜻밖의 행운, 우연한 발견",
-     ["극심한 피로", "고의적인 방해", "엄격한 규율"], 5, 0, 1),
-    ("ubiquitous", "/juːˈbɪkwɪtəs/", "어디에나 존재하는",
-     ["희귀한", "복잡한", "일시적인"], 4, 0, 2),
-    ("meticulous", "/məˈtɪkjələs/", "꼼꼼한, 세심한",
-     ["부주의한", "관대한", "충동적인"], 3, 1, 3),
-    ("resilient", "/rɪˈzɪliənt/", "회복력 있는, 탄력 있는",
-     ["연약한", "무관심한", "완고한"], 3, 0, 1),
-    ("ambiguous", "/æmˈbɪɡjuəs/", "애매모호한",
-     ["명확한", "화려한", "지루한"], 2, 1, 4),
-    ("candor", "/ˈkændər/", "솔직함, 정직함",
-     ["교활함", "냉담함", "허영심"], 2, 0, 5),
-    ("pragmatic", "/præɡˈmætɪk/", "실용적인, 실리적인",
-     ["이상적인", "감상적인", "비관적인"], 1, 2, 6),
-    ("nuance", "/ˈnuːɑːns/", "미묘한 차이",
-     ["명백한 오류", "거대한 규모", "단순한 반복"], 1, 0, 2),
-    ("eloquent", "/ˈeləkwənt/", "웅변의, 유창한",
-     ["말을 더듬는", "무뚝뚝한", "시끄러운"], 0, 2, 7),
-    ("tenacious", "/təˈneɪʃəs/", "끈질긴, 집요한",
-     ["쉽게 포기하는", "느긋한", "산만한"], 0, 3, 9),   # mastered
-    ("frugal", "/ˈfruːɡl/", "검소한, 절약하는",
-     ["낭비하는", "사치스러운", "관대한"], 0, 3, 10),   # mastered
-    ("empathy", "/ˈempəθi/", "공감, 감정이입",
-     ["무관심", "적대감", "우월감"], 1, 1, 3),
+    ("你好", "nǐhǎo", "안녕하세요",
+     ["고맙다", "미안하다", "잘 자"], 5, 0, 1),
+    ("谢谢", "xièxie", "고맙다",
+     ["미안하다", "괜찮다", "안녕"], 4, 0, 2),
+    ("水", "shuǐ", "물",
+     ["불", "흙", "바람"], 3, 1, 3),
+    ("钱", "qián", "돈",
+     ["책", "집", "차"], 3, 0, 1),
+    ("猫", "māo", "고양이",
+     ["개", "새", "물고기"], 2, 1, 4),
+    ("吃", "chī", "먹다",
+     ["마시다", "자다", "보다"], 2, 0, 5),
+    ("大", "dà", "크다",
+     ["작다", "높다", "길다"], 1, 2, 6),
+    ("学生", "xuésheng", "학생",
+     ["선생님", "의사", "친구"], 1, 0, 2),
+    ("喜欢", "xǐhuan", "좋아하다",
+     ["싫어하다", "원하다", "필요하다"], 0, 2, 7),
+    ("漂亮", "piàoliang", "예쁘다",
+     ["못생기다", "빠르다", "느리다"], 0, 3, 9),   # mastered
 ]
 
-# (sentence with ___, answer, distractors, wrong_count, streak, days_ago)
+# 문법: (문장(___·뜻), 빈칸 한자, 빈칸 병음, 빈칸 개별 뜻, 한자 오답들,
+#        wrong_count, streak, days_ago)
 GRAMMAR = [
-    ("If I ___ known earlier, I would have helped.", "had",
-     ["have", "has", "having"], 6, 0, 1),
-    ("She suggested that he ___ the report by Friday.", "submit",
-     ["submits", "submitted", "will submit"], 4, 0, 2),
-    ("I look forward to ___ from you soon.", "hearing",
-     ["hear", "heard", "be heard"], 3, 0, 1),
-    ("The project ___ by the team last month.", "was completed",
-     ["completed", "has completed", "is completing"], 2, 1, 4),
-    ("He is used to ___ up early every morning.", "waking",
-     ["wake", "woke", "be woken"], 2, 0, 5),
-    ("Not only ___ late, but he also forgot the files.", "was he",
-     ["he was", "he is", "did he"], 1, 2, 6),
-    ("I wish I ___ more time to finish it.", "had",
-     ["have", "will have", "am having"], 1, 0, 3),
-    ("By the time we arrived, the movie ___ already started.", "had",
-     ["has", "have", "was"], 0, 3, 9),   # mastered
+    ("你 ___ 学生吗？(너 학생이야?)", "是", "shì", "~이다 (be동사)",
+     ["有", "在", "的"], 6, 0, 1),
+    ("我 ___ 钱。(나 돈 없어.)", "没", "méi", "안 ~있다 (부정)",
+     ["不", "别", "无"], 4, 0, 2),
+    ("这 ___ 猫很漂亮。(이 고양이 예쁘다.)", "只", "zhī", "마리 (동물 양사)",
+     ["个", "条", "本"], 3, 0, 1),
+    ("我 ___ 喜欢你。(나 너 정말 좋아해.)", "很", "hěn", "매우 (정도부사)",
+     ["太", "真", "最"], 2, 1, 4),
+    ("他 ___ 吃饭。(그는 밥 먹는 중이다.)", "在", "zài", "~하는 중 (진행)",
+     ["了", "过", "着"], 1, 2, 6),
+    ("你 ___？(너는?)", "呢", "ne", "~는? (되묻는 어기조사)",
+     ["吗", "吧", "了"], 0, 3, 9),   # mastered
 ]
 
 
 def build_items() -> list[dict[str, Any]]:
     """VOCAB/GRAMMAR 정의를 import API가 받는 항목 dict 리스트로 변환한다."""
     items: list[dict[str, Any]] = []
-    for word, ipa, meaning, wrongs, wc, streak, ago in VOCAB:
+    for word, pinyin, meaning, wrongs, wc, streak, ago in VOCAB:
         items.append({
             "type": "vocabulary",
             "id": str(uuid.uuid4()),
             "word": word,
-            "pronunciation": ipa,
+            "pronunciation": pinyin,
             "meaning": meaning,
             "options": [meaning, *wrongs],
             "correct_option": meaning,
@@ -96,11 +89,13 @@ def build_items() -> list[dict[str, Any]]:
             "consecutive_correct": streak,
             "created_at": days_ago(ago),
         })
-    for sentence, answer, wrongs, wc, streak, ago in GRAMMAR:
+    for sentence, answer, pinyin, target_meaning, wrongs, wc, streak, ago in GRAMMAR:
         items.append({
             "type": "grammar",
             "id": str(uuid.uuid4()),
             "sentence": sentence,
+            "pronunciation": pinyin,
+            "target_meaning": target_meaning,
             "options": [answer, *wrongs],
             "correct_option": answer,
             "wrong_count": wc,

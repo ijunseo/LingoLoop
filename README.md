@@ -115,10 +115,12 @@ one thing being tested.
   - target_meaning: the meaning/grammatical function of ONLY the blanked
     word (not the whole sentence), e.g. "~이다 (be동사)". This is what lets
     the learner ignore meaning entirely and focus purely on pronunciation.
-- options: 4 multiple-choice Hanzi strings (kept as a fallback format for
-  the homophone-particle case above); exactly one is correct.
-- correct_option: the Hanzi that fills the blank (vocabulary: not used for
-  grading, just informational; grammar: the word substituted into ___).
+- options / correct_option — used only for the fallback multiple-choice
+  format when pronunciation is unavailable, and they DIFFER by type:
+  - "vocabulary": options = 4 native-language MEANINGS (Korean), exactly one
+    correct; correct_option = that correct meaning.
+  - "grammar": options = 4 Hanzi candidates for the blank, exactly one
+    correct; correct_option = the Hanzi that fills ___.
 - wrong_count: 0
 - consecutive_correct: 0
 - created_at: ISO 8601 timestamp.
@@ -185,6 +187,25 @@ LingoLoop은 가벼운 간격 반복(SRS) 모델로 항목을 4가지 상태로 
 대시보드 좌하단 구석의 **🗑 DB 리셋** 버튼은 데이터 포맷을 이것저것 바꿔가며
 테스트할 때 쓰는 개발용 기능입니다 — 클릭하면 확인 후 단어·문법을 전부
 삭제합니다(되돌릴 수 없음).
+
+---
+
+## 🌏 다른 언어로 바꾸기 (예: 광둥어/광저우)
+
+이 앱은 발음 표기법을 특정 언어에 하드코딩하지 않습니다. **광둥어(광저우 지역
+중국어)** 로 바꾸는 것도 가능합니다:
+
+1. [`src/frontend/app.js`](src/frontend/app.js)에서 `TTS_LANG`을 `"zh-CN"` →
+   **`"zh-HK"`** 로, `STUDY_LANG_LABEL`을 `"광둥어"` 로 바꿉니다.
+   (Edge에는 광둥어 음성 HiuGaai·HiuMaan·WanLung이 내장돼 있습니다.)
+2. 데이터는 병음 대신 **Jyutping(월병)** 발음으로 임포트합니다 — Step 2 추출
+   프롬프트에서 "STANDARD DICTIONARY PINYIN" 부분을 `Jyutping (e.g. "nei5 hou2",
+   "ngo5", "m4 goi1")` 로 바꾸면 됩니다.
+3. 기존 만다린 데이터는 발음 체계가 완전히 다르므로, 좌하단 **🗑 DB 리셋** 후
+   광둥어 데이터로 새로 임포트하세요.
+
+> 만다린과 광둥어는 한자는 대체로 공유하지만 발음이 완전히 달라서, 한 DB에
+> 섞지 말고 언어별로 따로 쓰는 걸 권장합니다.
 
 ---
 
