@@ -12,6 +12,7 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 # Windows consoles may be cp932/cp949; keep unicode output from crashing.
 try:
@@ -26,6 +27,7 @@ import server  # noqa: E402
 
 
 def days_ago(n: int) -> str:
+    """n일 전 UTC 시각을 ISO 8601 문자열로 반환한다."""
     return (datetime.now(timezone.utc) - timedelta(days=n)).isoformat()
 
 
@@ -78,8 +80,9 @@ GRAMMAR = [
 ]
 
 
-def build_items() -> list[dict]:
-    items: list[dict] = []
+def build_items() -> list[dict[str, Any]]:
+    """VOCAB/GRAMMAR 정의를 import API가 받는 항목 dict 리스트로 변환한다."""
+    items: list[dict[str, Any]] = []
     for word, ipa, meaning, wrongs, wc, streak, ago in VOCAB:
         items.append({
             "type": "vocabulary",
@@ -108,6 +111,7 @@ def build_items() -> list[dict]:
 
 
 def main() -> None:
+    """더미 데이터를 DB에 주입하고 처리 건수를 출력한다."""
     server.init_db()
     items = build_items()
     with server.get_db() as conn:
