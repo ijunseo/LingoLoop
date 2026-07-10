@@ -90,8 +90,8 @@
         </div>
       </div>
 
-      <!-- Study mode CTAs: 미학습 / 학습필요 / 완전학습완 각각 별도로 연습 -->
-      <div class="grid gap-3 sm:grid-cols-3">
+      <!-- Study mode CTAs: 미학습 / 학습필요 / 학습완(재확인) / 완전학습완 -->
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <button class="mode-btn" data-mode="new">
           <span class="mode-btn-icon">🆕</span>
           <span class="mode-btn-title">새 단어 학습</span>
@@ -101,6 +101,11 @@
           <span class="mode-btn-icon">🔁</span>
           <span class="mode-btn-title">복습</span>
           <span class="mode-btn-sub">지금 풀 때가 된 항목</span>
+        </button>
+        <button class="mode-btn" data-mode="fresh">
+          <span class="mode-btn-icon">💤</span>
+          <span class="mode-btn-title">학습완 재확인</span>
+          <span class="mode-btn-sub">쉬는 중인 항목 · 기록 안 함</span>
         </button>
         <button class="mode-btn" data-mode="mastered">
           <span class="mode-btn-icon">🏆</span>

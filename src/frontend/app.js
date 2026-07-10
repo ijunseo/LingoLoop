@@ -238,7 +238,12 @@ $("#reset-db-btn").addEventListener("click", async () => {
 // 퀴즈 엔진 (Quiz engine)
 // --------------------------------------------------------------------------- //
 /** 학습 모드별 한글 라벨(대시보드 버튼·퀴즈 배지·완료 메시지에서 공용으로 사용). */
-const MODE_LABEL = { new: "새 단어 학습", due: "복습", mastered: "마스터 연습" };
+const MODE_LABEL = {
+  new: "새 단어 학습",
+  due: "복습",
+  fresh: "학습완 재확인", // 쉬는 중인 항목을 기록 없이 다시 확인
+  mastered: "마스터 연습",
+};
 
 /**
  * 진행 중인 퀴즈 세션 상태.
@@ -318,7 +323,8 @@ function normalizeItem(item) {
 async function startQuiz(mode) {
   quiz.mode = mode;
   showView("quiz");
-  $("#quiz-mode-badge").textContent = MODE_LABEL[mode] || mode;
+  $("#quiz-mode-badge").textContent =
+    mode === "fresh" ? "학습완 재확인 · 기록 안 함" : MODE_LABEL[mode] || mode;
   $("#quiz-done").classList.add("hidden");
   $("#quiz-card").classList.remove("hidden");
   let data;
@@ -475,21 +481,25 @@ async function selectOption(btn, opt, item) {
   if (item.type === "vocabulary") speak(item.word);
   else speakSentence(item.sentence, item.correct_option);
 
+  // "학습완 재확인"(fresh)은 잠자는 항목을 그냥 다시 확인하는 용도라 DB에 기록하지
+  // 않는다 — last_reviewed_at/streak을 안 건드려 잠자는 상태를 그대로 둔다.
+  const record = quiz.mode !== "fresh";
+
   if (isCorrect) {
     if (!quiz.everWrong.has(key)) {
-      // 첫 시도 정답 → 마스터 카운트 반영
-      sendReview(item, true);
+      // 첫 시도 정답 → (기록 모드면) 마스터 카운트 반영
+      if (record) sendReview(item, true);
       quiz.firstTryCorrect += 1;
     }
     quiz.solved += 1;
     quiz.queue.shift(); // 푼 항목 제거
   } else {
     if (!quiz.everWrong.has(key)) {
-      // 1세션 1카운트: 최초 오답 1회만 DB에 반영
-      sendReview(item, false);
+      // 1세션 1카운트: 최초 오답 1회만 DB에 반영(기록 모드 한정)
+      if (record) sendReview(item, false);
       quiz.everWrong.add(key);
     }
-    // 이 항목을 큐 맨 뒤로 재삽입
+    // 이 항목을 큐 맨 뒤로 재삽입(재확인 모드에서도 맞힐 때까지 다시 풀게 한다)
     const [cur] = quiz.queue.splice(0, 1);
     quiz.queue.push(cur);
   }
@@ -538,15 +548,17 @@ function finishQuiz(empty) {
     const emptyMsg = {
       new: "새로 배울 항목이 없어요. 데이터를 먼저 주입해 주세요!",
       due: "지금 복습할 항목이 없어요. 학습완 항목은 며칠 뒤 다시 나타나요.",
+      fresh: "지금 쉬는 중(학습완)인 항목이 없어요.",
       mastered: "아직 완전학습완 항목이 없어요. 복습으로 3번 연속 맞혀보세요!",
     };
     $("#quiz-done-msg").textContent = emptyMsg[quiz.mode] || "풀 항목이 없어요.";
     return;
   }
   const missed = quiz.everWrong.size;
-  // 마스터는 이 세션만으로 안 오른다: 항목당 별도 세션 3번에 걸쳐 연속으로
-  // 첫 시도 정답을 내야 달성된다. 모드에 따라 안내 문구를 달리한다.
-  const tail = quiz.mode === "mastered"
+  // 모드에 따라 안내 문구를 달리한다. fresh는 기록하지 않는 재확인 세션이다.
+  const tail = quiz.mode === "fresh"
+    ? ". 재확인 세션이라 학습 상태에는 전혀 반영되지 않았어요."
+    : quiz.mode === "mastered"
     ? ". 틀린 항목은 학습필요로 되돌아가 다시 확인하게 돼요."
     : ". 정답을 맞히면 3일간 쉬었다가 다시 나오고, 3번 연속 통과하면 완전학습완이에요.";
   $("#quiz-done-msg").textContent =

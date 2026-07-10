@@ -132,6 +132,23 @@ def test_quiz_mode_rejects_unknown_value(client: TestClient) -> None:
     assert r.status_code == 422
 
 
+def test_quiz_fresh_mode_returns_resting_items(client: TestClient) -> None:
+    """정답을 맞혀 학습완(fresh)이 된 항목은 mode=fresh로만 나오고 due/new엔 안 나온다.
+
+    (학습완 '재확인'은 프론트엔드가 결과를 기록하지 않으므로, 서버 쪽에서는
+    fresh 항목을 조회만 할 수 있게 열어두면 된다.)
+    """
+    import_payload(client, json.dumps([vocab("v-f", "水", "물")], ensure_ascii=False))
+    client.put("/api/review", json={"id": "v-f", "type": "vocabulary", "correct": True})
+
+    fresh_ids = {it["id"] for it in client.get("/api/quiz?mode=fresh").json()["items"]}
+    due_ids = {it["id"] for it in client.get("/api/quiz?mode=due").json()["items"]}
+    new_ids = {it["id"] for it in client.get("/api/quiz?mode=new").json()["items"]}
+    assert "v-f" in fresh_ids
+    assert "v-f" not in due_ids
+    assert "v-f" not in new_ids
+
+
 def test_quiz_sorted_by_weight(client: TestClient) -> None:
     """wrong_count가 큰 항목이 앞에 온다 (wrong_count*10 가중). 둘 다 미학습 상태."""
     items = [
