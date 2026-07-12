@@ -277,6 +277,96 @@ def test_grammar_pronunciation_round_trips(client: TestClient) -> None:
     assert item["pronunciation"] == "shì"
     assert item["target_meaning"] == "~이다 (be동사)"
     assert item["correct_option"] == "是"  # 빈칸에 채울 한자는 그대로 유지
+    assert item["answer"] == "是"  # 구버전 데이터도 마이그레이션된 answer를 제공
+
+
+def test_llm_authored_pinyin_options_and_grammar_answer_round_trip(
+    client: TestClient,
+) -> None:
+    """새 형식은 LLM 병음 선택지와 문법 한자 정답을 서로 분리해 보존한다."""
+    items = [
+        {
+            "type": "vocabulary",
+            "id": "v-wan",
+            "word": "晚上",
+            "pronunciation": "wǎnshang",
+            "meaning": "저녁",
+            "options": ["wǎnshang", "wánshang", "wǎnxià", "wènshang"],
+            "correct_option": "wǎnshang",
+            "created_at": "2026-07-13T00:00:00Z",
+        },
+        {
+            "type": "grammar",
+            "id": "g-shi-new",
+            "sentence": "你 ___ 学生。(너는 학생이다.)",
+            "pronunciation": "shì",
+            "target_meaning": "~이다 (be동사)",
+            "answer": "是",
+            "options": ["shì", "shí", "sì", "shǐ"],
+            "correct_option": "shì",
+            "created_at": "2026-07-13T00:00:00Z",
+        },
+    ]
+    assert import_payload(client, json.dumps(items, ensure_ascii=False))["skipped"] == 0
+
+    quiz = client.get("/api/quiz?mode=new").json()["items"]
+    vo = next(item for item in quiz if item["id"] == "v-wan")
+    assert vo["options"] == items[0]["options"]
+    assert vo["correct_option"] == vo["pronunciation"] == "wǎnshang"
+
+    gram = next(item for item in quiz if item["id"] == "g-shi-new")
+    assert gram["answer"] == "是"
+    assert gram["options"] == items[1]["options"]
+    assert gram["correct_option"] == gram["pronunciation"] == "shì"
+
+
+def test_new_schema_rejects_broken_option_contract(client: TestClient) -> None:
+    """새 병음 형식은 중복 선택지나 빈 answer를 조용히 저장하지 않는다."""
+    grammar_item = {
+        "type": "grammar",
+        "id": "g-bad-options",
+        "sentence": "你 ___ 学生。(너는 학생이다.)",
+        "pronunciation": "shì",
+        "target_meaning": "~이다",
+        "answer": "",
+        "options": ["shì", "shì", "sì", "shǐ"],
+        "correct_option": "shì",
+        "created_at": "2026-07-13T00:00:00Z",
+    }
+    vocab_item = {
+        "type": "vocabulary",
+        "id": "v-bad-options",
+        "word": "晚上",
+        "pronunciation": "wǎnshang",
+        "meaning": "저녁",
+        "options": ["wǎnshang", "wǎnshang", "wǎnxià", "wènshang"],
+        "correct_option": "wǎnshang",
+        "created_at": "2026-07-13T00:00:00Z",
+    }
+    counts = import_payload(
+        client, json.dumps([grammar_item, vocab_item], ensure_ascii=False)
+    )
+    assert counts == {"vocabulary": 0, "grammar": 0, "skipped": 2}
+
+
+def test_new_homophone_fallback_keeps_hanzi_options(client: TestClient) -> None:
+    """진짜 동음 문법 예외는 빈 발음과 한자 선택지를 새 answer 구조로 저장한다."""
+    item = {
+        "type": "grammar",
+        "id": "g-de",
+        "sentence": "他慢慢 ___ 走。(그는 천천히 걷는다.)",
+        "pronunciation": "",
+        "target_meaning": "부사어 표지",
+        "answer": "地",
+        "options": ["的", "地", "得", "了"],
+        "correct_option": "地",
+        "created_at": "2026-07-13T00:00:00Z",
+    }
+    assert import_payload(client, json.dumps([item], ensure_ascii=False))["grammar"] == 1
+    saved = client.get("/api/quiz?mode=new").json()["items"][0]
+    assert saved["pronunciation"] == ""
+    assert saved["answer"] == saved["correct_option"] == "地"
+    assert saved["options"] == ["的", "地", "得", "了"]
 
 
 def test_seed_dummy_imports_cleanly(client: TestClient) -> None:
@@ -296,6 +386,9 @@ def test_seed_dummy_imports_cleanly(client: TestClient) -> None:
     quiz = client.get("/api/quiz?mode=new").json()["items"]
     gram = [it for it in quiz if it["type"] == "grammar"]
     assert gram and all(it.get("pronunciation") for it in gram)  # 문법에 병음 존재
+    assert all(it["answer"] for it in gram)
+    assert all(it["correct_option"] == it["pronunciation"] for it in quiz)
+    assert all(len(it["options"]) == 4 for it in quiz)
 
 
 def test_reset_clears_all_data(client: TestClient) -> None:

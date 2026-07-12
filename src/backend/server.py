@@ -81,10 +81,11 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS grammar (
                 id                  TEXT PRIMARY KEY,
                 sentence            TEXT NOT NULL,   -- ___ 빈칸을 포함, 뒤에 (전체 뜻) 표기 관습
-                pronunciation       TEXT DEFAULT '', -- 빈칸(=correct_option) 한자의 표준 병음
+                pronunciation       TEXT DEFAULT '', -- 빈칸(answer)의 표준 병음
                 target_meaning      TEXT DEFAULT '', -- 빈칸 글자 하나의 개별 뜻/문법 기능
-                options             TEXT NOT NULL,   -- JSON array of 4 strings (구식 한자 4지선다 폴백용)
-                correct_option      TEXT NOT NULL,   -- 빈칸에 들어가는 한자
+                answer              TEXT NOT NULL DEFAULT '', -- 빈칸에 실제로 들어가는 한자/표현
+                options             TEXT NOT NULL,   -- JSON array: 일반=병음, 동음 폴백=한자
+                correct_option      TEXT NOT NULL,   -- 화면 선택지 중 정답(병음 또는 한자)
                 wrong_count         INTEGER NOT NULL DEFAULT 0,
                 consecutive_correct INTEGER NOT NULL DEFAULT 0,
                 last_reviewed_at    TEXT DEFAULT NULL, -- NULL=미학습(new)
@@ -97,6 +98,13 @@ def init_db() -> None:
         _ensure_column(conn, "grammar", "last_reviewed_at", "TEXT DEFAULT NULL")
         _ensure_column(conn, "grammar", "pronunciation", "TEXT DEFAULT ''")
         _ensure_column(conn, "grammar", "target_meaning", "TEXT DEFAULT ''")
+        _ensure_column(conn, "grammar", "answer", "TEXT NOT NULL DEFAULT ''")
+        # 구버전은 correct_option에 빈칸 한자를 저장했다. 새 스키마에서는 그 값을
+        # answer로 옮겨 두고, 기존 options/correct_option은 호환용으로 그대로 둔다.
+        conn.execute(
+            "UPDATE grammar SET answer = correct_option "
+            "WHERE answer IS NULL OR TRIM(answer) = ''"
+        )
         _backfill_last_reviewed_at(conn)
 
 
@@ -242,6 +250,9 @@ def upsert_items(conn: sqlite3.Connection, items: Iterable[dict[str, Any]]) -> d
                 options = json.loads(options)
             except json.JSONDecodeError:
                 options = [options]
+        if not isinstance(options, list):
+            options = []
+        options = [str(option).strip() for option in options if str(option).strip()]
         correct = _first(item, "correct_option", "answer", "correct")
         created_at = _first(item, "created_at", default="")
         item_id = str(_first(item, "id", default="")).strip()
@@ -250,7 +261,17 @@ def upsert_items(conn: sqlite3.Connection, items: Iterable[dict[str, Any]]) -> d
 
         if itype == "vocabulary":
             word = _first(item, "word", "term", "vocab")
+            pronunciation = str(_first(item, "pronunciation", "ipa", default=""))
+            uses_pinyin_options = bool(pronunciation) and str(correct) == pronunciation
+            valid_pinyin_options = (
+                len(options) == 4
+                and len(set(options)) == 4
+                and pronunciation in options
+            )
             if not (item_id and word and correct):
+                counts["skipped"] += 1
+                continue
+            if uses_pinyin_options and not valid_pinyin_options:
                 counts["skipped"] += 1
                 continue
             conn.execute(
@@ -269,7 +290,7 @@ def upsert_items(conn: sqlite3.Connection, items: Iterable[dict[str, Any]]) -> d
                 (
                     item_id,
                     str(word),
-                    str(_first(item, "pronunciation", "ipa", default="")),
+                    pronunciation,
                     str(_first(item, "meaning", "definition", default=correct)),
                     json.dumps(options, ensure_ascii=False),
                     str(correct),
@@ -282,27 +303,47 @@ def upsert_items(conn: sqlite3.Connection, items: Iterable[dict[str, Any]]) -> d
 
         elif itype == "grammar":
             sentence = _first(item, "sentence", "question", "text")
-            if not (item_id and sentence and correct):
+            pronunciation = str(_first(item, "pronunciation", "ipa", default=""))
+            # 새 형식은 answer(실제 빈칸 한자)와 correct_option(선택할 병음)을
+            # 분리한다. answer가 없는 과거 데이터는 correct_option이 한자였으므로
+            # 그대로 answer로 승격해 학습 기록과 데이터 주입 호환성을 지킨다.
+            uses_new_schema = "answer" in item
+            answer = str(item.get("answer", "")).strip() if uses_new_schema else str(correct)
+            valid_new_options = (
+                len(options) == 4
+                and len(set(options)) == 4
+                and str(correct) in options
+                and (
+                    (bool(pronunciation) and str(correct) == pronunciation)
+                    or (not pronunciation and str(correct) == str(answer))
+                )
+            )
+            if not (item_id and sentence and correct and answer):
+                counts["skipped"] += 1
+                continue
+            if uses_new_schema and not valid_new_options:
                 counts["skipped"] += 1
                 continue
             conn.execute(
                 """
                 INSERT INTO grammar
-                    (id, sentence, pronunciation, target_meaning, options, correct_option,
-                     wrong_count, consecutive_correct, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?)
+                    (id, sentence, pronunciation, target_meaning, answer, options,
+                     correct_option, wrong_count, consecutive_correct, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                     sentence=excluded.sentence,
                     pronunciation=excluded.pronunciation,
                     target_meaning=excluded.target_meaning,
+                    answer=excluded.answer,
                     options=excluded.options,
                     correct_option=excluded.correct_option
                 """,
                 (
                     item_id,
                     str(sentence),
-                    str(_first(item, "pronunciation", "ipa", default="")),
+                    pronunciation,
                     str(_first(item, "target_meaning", "target_gloss", default="")),
+                    str(answer),
                     json.dumps(options, ensure_ascii=False),
                     str(correct),
                     wrong,
@@ -443,6 +484,7 @@ def api_quiz(
                 sentence=row["sentence"],
                 pronunciation=row["pronunciation"],
                 target_meaning=row["target_meaning"],
+                answer=row["answer"],
             )
         return base
 

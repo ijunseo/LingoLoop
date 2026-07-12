@@ -72,84 +72,123 @@ uv run python src/scripts/generate_profile.py
 
 ### Step 2 — 자유 대화 후 추출
 대화가 끝나면, AI에게 아래 프롬프트를 줘서 오늘 배운 내용을 JSON으로 뽑습니다.
-핵심은 두 가지입니다:
+핵심은 세 가지입니다:
 1. `pronunciation`은 **사전에 나오는 표준 병음(성조 기호 포함)** 이어야 합니다 —
    IPA나 슬래시(`/.../`)로 오면 퀴즈 화면에서 어색하게 표시됩니다.
 2. **문법도 문장 통째로 추출**하고, 문장 전체 뜻과 빈칸 글자 하나의 개별 뜻을
    둘 다 공개합니다. 뜻은 이미 다 알려주니 학습자는 오직 **그 글자를 어떻게
    읽는지(발음)** 에만 집중하면 됩니다.
+3. `options`는 다른 DB 항목에서 무작위로 뽑지 않고, AI가 정답과 성조·초성·운모가
+   비슷한 **문항 전용 병음 오답 3개**를 함께 만듭니다.
 
 ```
 [System Instruction: LingoLoop Universal Data Extractor]
-Extract all key vocabulary and grammar elements from our conversation
-today and format them into a single JSON list. Return ONLY the pure JSON block
-without any explanations, greetings, or markdown formatting.
+Your response MUST be one valid JSON array and nothing else. Do not output
+markdown fences, prose, greetings, comments, or trailing text. If no eligible
+lesson item exists, return [].
 
-# Learner context
-The learner can already read/guess Hanzi shapes and meanings reasonably well
-(years of Kanji exposure). Seeing a multiple-choice list of Hanzi lets them
-skip straight to "oh, I recognize this character" without ever working out
-the pronunciation — that's a shortcut we want to eliminate. The real
-bottleneck is knowing the Mandarin PRONUNCIATION of a given character/word.
-So for every item, meaning is freely revealed, and "pronunciation" is the
-one thing being tested.
+# 1. Source boundary — non-negotiable
+Extract ONLY Mandarin vocabulary and grammar that the learner actually learned,
+discussed, corrected, or practised in the lesson conversation BEFORE this
+instruction. Mere appearance is not evidence of learning.
 
-# Schema (one object per item):
-- type: strictly "vocabulary" or "grammar".
-- id: random UUID v4 (unique per item).
-- pronunciation (BOTH types): STANDARD DICTIONARY PINYIN WITH TONE MARKS —
-  the exact convention used in Chinese-English dictionaries (e.g. Pleco,
-  MDBG). NOT IPA, NOT tone numbers, NOT wrapped in slashes.
-    good: "nǐ hǎo"     good: "xièxie"     good: "shì"
-    bad:  "/ni˨˩˦ xɑʊ˨˩˦/"   bad: "ni3 hao3"   bad: "/wɔ/"
-  Use the tone diacritics ā á ǎ à / ē é ě è / ī í ǐ ì / ō ó ǒ ò /
-  ū ú ǔ ù / ǖ ǘ ǚ ǜ. Multi-character words: separate syllables with a
-  space, e.g. "名字" → "míngzi", "好久" → "hǎojiǔ".
-  EXCEPTION: if the target character is a grammatical particle that is a
-  true homophone of other candidates (的 / 地 / 得 are ALL pronounced "de"),
-  pronunciation alone can't test it meaningfully — leave this field "" and
-  the app will automatically fall back to a Hanzi multiple-choice question
-  for that one item instead.
-- For "vocabulary":
-  - word: the Hanzi, e.g. "你好".
-  - meaning: meaning in the learner's native language (Korean).
-- For "grammar" — extract the FULL sentence, not just an isolated pattern:
-  - sentence: the whole sentence with a ___ marking exactly one target
-    word/phrase, followed by the sentence's overall meaning in parentheses.
-    e.g. "你 ___ 学生。(너는 학생이다.)"
-  - target_meaning: the meaning/grammatical function of ONLY the blanked
-    word (not the whole sentence), e.g. "~이다 (be동사)". This is what lets
-    the learner ignore meaning entirely and focus purely on pronunciation.
-- options / correct_option — used only for the fallback multiple-choice
-  format when pronunciation is unavailable, and they DIFFER by type:
-  - "vocabulary": options = 4 native-language MEANINGS (Korean), exactly one
-    correct; correct_option = that correct meaning.
-  - "grammar": options = 4 Hanzi candidates for the blank, exactly one
-    correct; correct_option = the Hanzi that fills ___.
-- wrong_count: 0
-- consecutive_correct: 0
-- created_at: ISO 8601 timestamp.
+NEVER extract content from this instruction, schema placeholders, examples,
+README text, code blocks, app instructions, a prior Learning Profile, incidental
+example sentences, deleted items, or an earlier form later judged incorrect.
+When an item was corrected, keep only the final corrected form. Deduplicate
+repeated items. Do not invent lesson content to reach a target count.
 
-# Worked examples
-{"type":"vocabulary","id":"<uuid>","word":"谢谢","pronunciation":"xièxie",
- "meaning":"고맙다","options":["미안하다","괜찮다","고맙다","안녕"],
- "correct_option":"고맙다","wrong_count":0,"consecutive_correct":0,
- "created_at":"2026-07-10T00:00:00Z"}
+# 2. Learning objective
+The learner can infer Hanzi shape and meaning through long Kanji experience.
+Reveal Hanzi and Korean meaning; test Mandarin pronunciation. Every ordinary
+item therefore needs one correct pinyin and three deliberately confusable pinyin
+distractors generated for THAT item. Never fill distractors by sampling unrelated
+words from the conversation.
 
-{"type":"grammar","id":"<uuid>","sentence":"你 ___ 学生。(너는 학생이다.)",
- "pronunciation":"shì","target_meaning":"~이다 (be동사)",
- "options":["是","有","在","的"],"correct_option":"是",
- "wrong_count":0,"consecutive_correct":0,"created_at":"2026-07-10T00:00:00Z"}
+# 3. Pinyin rules — all must pass
+- Use lowercase standard dictionary Hanyu Pinyin with tone diacritics.
+- Never use IPA, tone numbers, slashes, uppercase, or tone-less spelling for a
+  syllable that is not neutral tone.
+- Write syllables belonging to one lexical word together. Put a space only
+  between separate words in a multi-word expression.
+- Preserve dictionary neutral tones without a tone mark.
 
-{"type":"grammar","id":"<uuid>","sentence":"唱 ___ 很好听。(노래 부르는 게 진짜 듣기 좋다.)",
- "pronunciation":"","target_meaning":"",
- "options":["的","地","得","了"],"correct_option":"得",
- "wrong_count":0,"consecutive_correct":0,"created_at":"2026-07-10T00:00:00Z"}
+# 4. Pronunciation option contract — all must pass
+For every item whose pronunciation is non-empty:
+- options MUST contain exactly 4 non-empty, pairwise-distinct strings.
+- options MUST contain pronunciation exactly once.
+- correct_option MUST equal pronunciation byte-for-byte.
+- The other 3 options MUST have the same syllable count whenever possible and
+  differ subtly in tone, initial, final, or one syllable only.
+- At least 2 of the 3 distractors MUST preserve the target's syllable count.
+- At least 1 distractor MUST differ only by tone on one or more syllables.
+- A distractor may be a non-word, but every syllable MUST be phonotactically
+  valid standard Hanyu Pinyin. Never create an impossible initial-final pairing.
+- Do not use a distractor that is an accepted pronunciation of the target Hanzi
+  in the given meaning/context. Do not use spelling-format variants of the answer.
+- Reject and regenerate unrelated, obviously removable, much longer/shorter,
+  duplicate, or identical distractors before producing the JSON.
+
+# 5. Vocabulary object
+Use exactly these fields:
+{
+  "type": "vocabulary",
+  "id": "<UUID_V4>",
+  "word": "<TARGET_HANZI>",
+  "pronunciation": "<CORRECT_PINYIN>",
+  "meaning": "<KOREAN_MEANING>",
+  "options": ["<PINYIN_1>", "<PINYIN_2>", "<PINYIN_3>", "<PINYIN_4>"],
+  "correct_option": "<CORRECT_PINYIN>",
+  "wrong_count": 0,
+  "consecutive_correct": 0,
+  "created_at": "<CURRENT_ISO_8601_UTC_TIMESTAMP>"
+}
+
+# 6. Grammar object
+Extract the complete sentence, not an isolated pattern. Replace exactly one
+target word/expression with exactly one ___, then append the full Korean sentence
+meaning in parentheses. `answer` is always the actual Hanzi/expression that fills
+the blank. `correct_option` is the pinyin the learner selects.
+
+Use exactly these fields:
+{
+  "type": "grammar",
+  "id": "<UUID_V4>",
+  "sentence": "<FULL_CHINESE_SENTENCE_WITH_EXACTLY_ONE_BLANK>。(<FULL_KOREAN_MEANING>)",
+  "pronunciation": "<TARGET_PINYIN>",
+  "target_meaning": "<KOREAN_MEANING_OR_FUNCTION_OF_ONLY_THE_BLANK>",
+  "answer": "<TARGET_HANZI_OR_EXPRESSION>",
+  "options": ["<PINYIN_1>", "<PINYIN_2>", "<PINYIN_3>", "<PINYIN_4>"],
+  "correct_option": "<TARGET_PINYIN>",
+  "wrong_count": 0,
+  "consecutive_correct": 0,
+  "created_at": "<CURRENT_ISO_8601_UTC_TIMESTAMP>"
+}
+
+# 7. True-homophone grammar fallback only
+Use this exception ONLY when all meaningful Hanzi candidates are genuine
+homophones, so sound cannot distinguish the grammar choice. Do not use it merely
+because the target is a particle. For this exception only:
+- pronunciation MUST be "".
+- options MUST be exactly 4 distinct Hanzi candidates including answer.
+- correct_option MUST equal answer exactly.
+- Keep every other grammar field and rule unchanged.
+
+# 8. Silent final audit
+Before responding, silently check every object against sections 1–7. Remove any
+object whose lesson provenance is uncertain. Regenerate any invalid option set.
+Then output only the final JSON array. Placeholder tokens above describe
+structure only and are never lesson data.
 ```
 
 ### Step 3 — LingoLoop에 주입
 출력된 JSON을 대시보드의 **데이터 주입** 텍스트박스에 붙여넣고 **저장하기**를
 누릅니다. 마크다운 백틱(```` ```json ````)은 백엔드가 자동으로 제거합니다. ✨
+
+새 문법 형식은 빈칸의 실제 한자를 `answer`에, 선택할 병음 정답을
+`correct_option`에 따로 저장합니다. 기존 DB의 뜻/한자 선택지 데이터는 시작 시
+자동 마이그레이션되어 학습 기록이 유지되며, 새 형식으로 다시 주입하기 전까지는
+기존 발음 풀 방식이 호환용으로 적용됩니다.
 
 ### Step 4 — 연습 & 마스터
 대시보드에는 학습 상태별로 **네 개의 버튼**이 있습니다 — 아래 "학습 상태" 표 참고.

@@ -207,8 +207,8 @@ const SAMPLE_ITEMS = [
     word: "我",
     pronunciation: "wǒ", // 표준 병음(사전식), 슬래시·IPA 금지
     meaning: "나",
-    options: ["너", "나", "그", "우리"],
-    correct_option: "나",
+    options: ["wǒ", "wó", "wěi", "wù"],
+    correct_option: "wǒ",
     wrong_count: 0,
     consecutive_correct: 0,
     created_at: new Date().toISOString(),
@@ -217,8 +217,11 @@ const SAMPLE_ITEMS = [
     type: "grammar",
     id: crypto.randomUUID(),
     sentence: "你 ___ 学生。(너는 학생이다.)",
-    options: ["是", "有", "在", "的"],
-    correct_option: "是",
+    pronunciation: "shì",
+    target_meaning: "~이다 (be동사)",
+    answer: "是",
+    options: ["shì", "shí", "sì", "shǐ"],
+    correct_option: "shì",
     wrong_count: 0,
     consecutive_correct: 0,
     created_at: new Date().toISOString(),
@@ -415,6 +418,30 @@ function pronOptions(correct, pool, fallbackPool = []) {
 }
 
 /**
+ * LLM이 해당 항목에 직접 만든 병음 선택지가 새 스키마에 맞는지 확인한다.
+ * 정확히 4개·중복 없음·correct_option=pronunciation일 때만 사용한다.
+ * 그렇지 않은 과거 DB 항목은 pronOptions() 호환 폴백으로 넘긴다.
+ * @param {object} item - 퀴즈 항목.
+ * @returns {string[]|null} 검증된 뒤 섞인 병음 보기 또는 null.
+ */
+function authoredPronOptions(item) {
+  const correct = cleanPronunciation(item.pronunciation);
+  const options = Array.isArray(item.options)
+    ? item.options.map(cleanPronunciation).filter(Boolean)
+    : [];
+  const unique = new Set(options);
+  if (
+    options.length !== 4 ||
+    unique.size !== 4 ||
+    cleanPronunciation(item.correct_option) !== correct ||
+    !unique.has(correct)
+  ) {
+    return null;
+  }
+  return shuffle(options);
+}
+
+/**
  * 서버에서 받은 문항을 화면 표시용으로 정규화한다.
  * 발음 필드는 슬래시(IPA 표기 관습)를 제거해 사전식으로 다듬는다.
  * @param {object} item - /api/quiz가 내려준 원본 문항.
@@ -514,7 +541,8 @@ function renderCurrent() {
       <div class="mt-3 text-lg text-slate-400">${escapeHtml(item.meaning || "")}</div>
     `;
     quiz.currentCorrect = item.pronunciation;
-    options = pronOptions(item.pronunciation, quiz.pronPool, quiz.grammarPronPool);
+    options = authoredPronOptions(item)
+      || pronOptions(item.pronunciation, quiz.pronPool, quiz.grammarPronPool);
     isPron = true;
   } else if (item.type === "vocabulary") {
     // 발음 데이터가 없으면 기존 방식(뜻 고르기)으로 폴백.
@@ -529,18 +557,20 @@ function renderCurrent() {
     // 발음(병음)이다. 문장 전체 뜻은 원문의 괄호 번역을 그대로 보여주고,
     // 강조된 글자만의 개별 뜻/문법 기능도 따로 보여준다.
     $("#quiz-prompt").textContent = "강조된 글자의 발음을 고르세요 (🔊로 들어볼 수 있어요)";
+    const answer = item.answer || item.correct_option; // 구버전 DB 호환
     const filled = escapeHtml(item.sentence).replace(
       /_+/g,
-      `<span class="target-word">${escapeHtml(item.correct_option)}</span>`,
+      `<span class="target-word">${escapeHtml(answer)}</span>`,
     );
     q.innerHTML = `
       <div class="text-2xl font-semibold leading-relaxed">${filled}</div>
       ${item.target_meaning
-        ? `<div class="mt-3 text-base text-slate-400">${escapeHtml(item.correct_option)} → ${escapeHtml(item.target_meaning)}</div>`
+        ? `<div class="mt-3 text-base text-slate-400">${escapeHtml(answer)} → ${escapeHtml(item.target_meaning)}</div>`
         : ""}
     `;
     quiz.currentCorrect = item.pronunciation;
-    options = pronOptions(item.pronunciation, quiz.grammarPronPool, quiz.pronPool);
+    options = authoredPronOptions(item)
+      || pronOptions(item.pronunciation, quiz.grammarPronPool, quiz.pronPool);
     isPron = true;
   } else {
     // 발음 데이터가 없으면 기존 방식(빈칸에 맞는 한자 고르기)으로 폴백.
@@ -596,7 +626,7 @@ async function selectOption(btn, opt, item) {
 
   // 정답/오답 관계없이 정답 발음을 들려준다(맞혀도 틀려도 발음은 들어야 한다).
   if (item.type === "vocabulary") speak(item.word);
-  else speakSentence(item.sentence, item.correct_option);
+  else speakSentence(item.sentence, item.answer || item.correct_option);
 
   // "학습완 재확인"(fresh)은 잠자는 항목을 그냥 다시 확인하는 용도라 DB에 기록하지
   // 않는다 — last_reviewed_at/streak을 안 건드려 잠자는 상태를 그대로 둔다.
@@ -696,10 +726,10 @@ $("#tts-btn").addEventListener("click", () => {
     speak(item.word);
   } else if (item.pronunciation) {
     // 발음 매칭 형식: 화면에 이미 정답 한자가 보이므로 자유롭게 들려준다.
-    speakSentence(item.sentence, item.correct_option);
+    speakSentence(item.sentence, item.answer || item.correct_option);
   } else if (quiz.locked) {
     // 구식 빈칸-한자 폴백, 채점 후: 정답을 채워서 들려준다.
-    speakSentence(item.sentence, item.correct_option);
+    speakSentence(item.sentence, item.answer || item.correct_option);
   } else {
     // 구식 빈칸-한자 폴백, 채점 전: 빈칸은 짧은 쉼으로(정답 노출 방지).
     speakSentence(item.sentence, "，");
