@@ -109,6 +109,32 @@ def build_report(conn: sqlite3.Connection) -> str:
     )
     lines.append("")
 
+    lines.append("## 📋 Ground Rules for This Session")
+    lines.append("")
+    lines.append(
+        "- **I'm an absolute beginner (왕초보) in spoken/read Mandarin.** Use short, "
+        "simple sentences and basic grammar; introduce one new thing at a time and "
+        "check I've understood before moving on. Note: I can usually guess a Hanzi's "
+        "*meaning* quickly (years of Japanese Kanji study), so don't over-explain "
+        "character meaning — focus on pronunciation and how to actually use it."
+    )
+    lines.append(
+        "- **Text only. Never generate, attach, or reference an image** — no "
+        "flashcard images, diagrams, or any image-generation tool, under any "
+        "circumstance, for the whole conversation. Always respond in plain text."
+    )
+    lines.append(
+        "- **When I ask about a word or expression, also give 1-3 similar "
+        "expressions** (near-synonyms or common alternatives) with a short note on "
+        "the nuance/when to use which — not just an answer to the one thing I asked."
+    )
+    lines.append(
+        "- **After teaching something new, add a short \"💡 Key Point\"** — one "
+        "practical, non-obvious tip worth remembering (a common mistake, a tone or "
+        "usage quirk, a mnemonic) — not a restatement of the definition."
+    )
+    lines.append("")
+
     lines.append("## 📊 Overall Stats")
     lines.append("")
     lines.append("| Category | Total | Mastered |")
